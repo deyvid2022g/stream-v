@@ -3,29 +3,34 @@ import { useAuth } from '../context/AuthContext';
 import { useOrders } from '../context/OrderContext';
 import { useNotifications } from '../context/NotificationContext';
 
-import { Users, DollarSign, CreditCard, TrendingUp, Search, Trash2, Package } from 'lucide-react';
+import { Users, DollarSign, CreditCard, TrendingUp, Search, Package } from 'lucide-react';
 import type { OrderStatus } from '../types/order';
 import ProductManagement from './admin/ProductManagement';
 
+
+
 const Admin: React.FC = () => {
-  const { getAllUsers, updateUserBalance, deleteUser } = useAuth();
+  const { getAllUsers, updateUserBalance, deleteUser, createAdminUser } = useAuth();
   const { getAllOrders, updateOrderStatus } = useOrders();
   const { addNotification } = useNotifications();
   
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isCreateAccountModalOpen, setIsCreateAccountModalOpen] = useState(false);
+  const [isEditPasswordModalOpen, setIsEditPasswordModalOpen] = useState(false);
+
+  const [newAccount, setNewAccount] = useState({ name: '', email: '', password: '', role: 'admin' });
+  const [newPassword, setNewPassword] = useState('');
   const [selectedUser, setSelectedUser] = useState('');
   const [amount, setAmount] = useState('');
   const [isRechargeModalOpen, setIsRechargeModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('products');
-  const [searchTerm, setSearchTerm] = useState('');
 
   const users = getAllUsers();
   const orders = getAllOrders();
   const regularUsers = users.filter(user => user.role === 'user');
+  const adminUsers = users.filter(user => user.role === 'admin');
 
-  const filteredUsers = regularUsers.filter(user =>
-    user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    user.email.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+
 
   const filteredOrders = orders.filter(order => {
     const user = users.find(u => u.id === order.userId);
@@ -34,12 +39,7 @@ const Admin: React.FC = () => {
            order.id.includes(searchTerm);
   });
 
-const handleDeleteUser = (userId: string, userName: string) => {
-    if (window.confirm(`¿Estás seguro de que deseas eliminar al usuario ${userName}?`)) {
-      deleteUser(userId);
-      addNotification('success', `Usuario ${userName} eliminado exitosamente`);
-    }
-  };
+
 
   const handleRechargeBalance = (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,7 +47,7 @@ const handleDeleteUser = (userId: string, userName: string) => {
     
     const amountNumber = parseFloat(amount);
     if (isNaN(amountNumber) || amountNumber <= 0) {
-      addNotification('error', 'Por favor ingresa un monto válido');
+      alert('Por favor ingresa un monto válido');
       return;
     }
     
@@ -59,8 +59,356 @@ const handleDeleteUser = (userId: string, userName: string) => {
     setAmount('');
     setSelectedUser('');
     setIsRechargeModalOpen(false);
-    addNotification('success', `Saldo actualizado a $${newBalance.toFixed(2)} para ${user.name}`);
+    alert(`Saldo actualizado a $${newBalance.toFixed(2)} para ${user.name}`);
   };
+
+  const handleCreateAccount = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newAccount.name && newAccount.email && newAccount.password) {
+      const success = createAdminUser(newAccount.name, newAccount.email, newAccount.password, newAccount.role);
+      
+      if (success) {
+        setIsCreateAccountModalOpen(false);
+        setNewAccount({ name: '', email: '', password: '', role: 'admin' });
+        alert('Cuenta admin creada exitosamente');
+      } else {
+        alert('Error: Ya existe un usuario con ese email');
+      }
+    }
+  };
+
+  const handleEditPassword = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (selectedUser && newPassword) {
+      // Here you would typically make an API call to update the password
+      console.log(`Updating password for user ${selectedUser}`);
+      
+      setIsEditPasswordModalOpen(false);
+      setSelectedUser('');
+      setNewPassword('');
+      alert('Contraseña actualizada exitosamente');
+    }
+  };
+
+
+
+  const handleDeleteUser = (userId: string) => {
+    if (window.confirm('¿Estás seguro de que quieres eliminar esta cuenta de usuario? Esta acción no se puede deshacer.')) {
+      deleteUser(userId);
+      alert('Usuario eliminado exitosamente');
+    }
+  };
+
+  const renderAccounts = () => (
+     <div className="space-y-4 sm:space-y-6">
+       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-3 sm:space-y-0">
+         <h3 className="text-lg font-semibold text-gray-800">Gestión de Cuentas</h3>
+         <button
+           onClick={() => setIsCreateAccountModalOpen(true)}
+           className="px-4 py-2 bg-yellow-500 text-white rounded-lg hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-yellow-400"
+         >
+           Crear Nueva Cuenta Admin
+         </button>
+       </div>
+
+       {/* Sección de Cuentas de Administrador */}
+       <div className="bg-white rounded-lg shadow-md overflow-hidden">
+         <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
+           <h4 className="text-md font-medium text-gray-900">Cuentas de Administrador</h4>
+         </div>
+         <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nombre</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rol</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha de Creación</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Último Acceso</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {adminUsers.map(admin => (
+                  <tr key={admin.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm font-medium text-gray-900">{admin.name}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="text-sm text-gray-900">{admin.email}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                        Administrador
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {admin.createdAt.toLocaleDateString()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      Nunca
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => {
+                            setSelectedUser(admin.id);
+                            setIsEditPasswordModalOpen(true);
+                          }}
+                          className="text-blue-600 hover:text-blue-900 px-2 py-1 rounded hover:bg-blue-50"
+                        >
+                          Cambiar Contraseña
+                        </button>
+                        <button
+                          onClick={() => handleDeleteUser(admin.id)}
+                          className="text-red-600 hover:text-red-900 px-2 py-1 rounded hover:bg-red-50"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+       </div>
+
+       {/* Sección de Usuarios Regulares */}
+       <div className="bg-white rounded-lg shadow-md overflow-hidden">
+         <div className="bg-gray-50 px-6 py-3 border-b border-gray-200">
+           <h4 className="text-md font-medium text-gray-900">Usuarios Regulares</h4>
+         </div>
+         <div className="overflow-x-auto">
+           <table className="min-w-full divide-y divide-gray-200">
+             <thead className="bg-gray-50">
+               <tr>
+                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nombre</th>
+                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Saldo</th>
+                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estado</th>
+                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha de Registro</th>
+                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
+               </tr>
+             </thead>
+             <tbody className="bg-white divide-y divide-gray-200">
+               {users.map(user => (
+                 <tr key={user.id} className="hover:bg-gray-50">
+                   <td className="px-6 py-4 whitespace-nowrap">
+                     <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                   </td>
+                   <td className="px-6 py-4 whitespace-nowrap">
+                     <div className="text-sm text-gray-900">{user.email}</div>
+                   </td>
+                   <td className="px-6 py-4 whitespace-nowrap">
+                     <div className="text-sm text-gray-900">${user.balance.toFixed(2)}</div>
+                   </td>
+                   <td className="px-6 py-4 whitespace-nowrap">
+                     <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">
+                       Activo
+                     </span>
+                   </td>
+                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                     {user.createdAt.toLocaleDateString()}
+                   </td>
+                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                     <div className="flex space-x-2">
+                       <button
+                         onClick={() => {
+                           setSelectedUser(user.id);
+                           setIsEditPasswordModalOpen(true);
+                         }}
+                         className="text-blue-600 hover:text-blue-900 px-2 py-1 rounded hover:bg-blue-50"
+                       >
+                         Cambiar Contraseña
+                       </button>
+                       <button
+                         onClick={() => {
+                           setSelectedUser(user.id);
+                           setIsRechargeModalOpen(true);
+                         }}
+                         className="text-green-600 hover:text-green-900 px-2 py-1 rounded hover:bg-green-50"
+                       >
+                         Recargar Saldo
+                       </button>
+                       <button
+                         onClick={() => handleDeleteUser(user.id)}
+                         className="text-red-600 hover:text-red-900 px-2 py-1 rounded hover:bg-red-50"
+                       >
+                         Eliminar
+                       </button>
+                     </div>
+                   </td>
+                 </tr>
+               ))}
+             </tbody>
+           </table>
+         </div>
+       </div>
+
+      {/* Modal para Crear Cuenta */}
+      {isCreateAccountModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Crear Nueva Cuenta</h3>
+              <button 
+                onClick={() => {
+                  setIsCreateAccountModalOpen(false);
+                  setNewAccount({ name: '', email: '', password: '', role: 'admin' });
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <form onSubmit={handleCreateAccount}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nombre
+                </label>
+                <input
+                  type="text"
+                  value={newAccount.name}
+                  onChange={(e) => setNewAccount({...newAccount, name: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                  required
+                />
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={newAccount.email}
+                  onChange={(e) => setNewAccount({...newAccount, email: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                  required
+                />
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Contraseña
+                </label>
+                <input
+                  type="password"
+                  value={newAccount.password}
+                  onChange={(e) => setNewAccount({...newAccount, password: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                  required
+                />
+              </div>
+              
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Rol
+                </label>
+                <select
+                  value={newAccount.role}
+                  onChange={(e) => setNewAccount({...newAccount, role: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                >
+                  <option value="admin">Administrador</option>
+                  <option value="moderator">Moderador</option>
+                </select>
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreateAccountModalOpen(false);
+                    setNewAccount({ name: '', email: '', password: '', role: 'admin' });
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+                >
+                  Crear Cuenta
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Cambiar Contraseña */}
+      {isEditPasswordModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Cambiar Contraseña</h3>
+              <button 
+                onClick={() => {
+                  setIsEditPasswordModalOpen(false);
+                  setSelectedUser('');
+                  setNewPassword('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <form onSubmit={handleEditPassword}>
+               <div className="mb-4">
+                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                   Usuario
+                 </label>
+                 <input
+                   type="text"
+                   value={users.find(u => u.id === selectedUser)?.name || ''}
+                   disabled
+                   className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                 />
+               </div>
+               <div className="mb-6">
+                 <label className="block text-sm font-medium text-gray-700 mb-1">
+                   Nueva Contraseña
+                 </label>
+                 <input
+                   type="password"
+                   value={newPassword}
+                   onChange={(e) => setNewPassword(e.target.value)}
+                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                   required
+                   minLength={6}
+                 />
+               </div>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditPasswordModalOpen(false);
+                    setSelectedUser('');
+                    setNewPassword('');
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+                >
+                  Actualizar Contraseña
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
 
 
@@ -174,86 +522,7 @@ const handleDeleteUser = (userId: string, userName: string) => {
     </div>
   );
 
-  const renderUsers = () => (
-    <div className="space-y-4 sm:space-y-6 px-2 sm:px-0">
-      <div className="flex flex-col space-y-3 sm:space-y-0 sm:flex-row justify-between items-stretch sm:items-center">
-        <h3 className="text-base sm:text-lg font-semibold text-gray-800">Gestión de Usuarios</h3>
-        <div className="w-full sm:w-auto">
-          <div className="relative w-full">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Buscar usuarios..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 text-sm sm:text-base border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
-            />
-          </div>
-        </div>
-      </div>
 
-      <div className="bg-white rounded-lg shadow-sm sm:shadow-md overflow-hidden">
-        <div className="overflow-x-auto -mx-2 sm:mx-0">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50 hidden sm:table-header-group">
-              <tr>
-                <th className="px-3 sm:px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario</th>
-                <th className="px-3 sm:px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Saldo</th>
-                <th className="px-3 sm:px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hidden md:table-cell">Registro</th>
-                <th className="px-3 sm:px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredUsers.map(user => (
-                <tr key={user.id} className="hover:bg-gray-50 flex flex-col sm:table-row mb-4 sm:mb-0 last:mb-0 border border-gray-200 sm:border-none rounded-lg sm:rounded-none">
-                  <td className="px-3 sm:px-4 md:px-6 py-3 sm:py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="w-full">
-                        <div className="text-sm font-medium text-gray-900 truncate">{user.name}</div>
-                        <div className="text-xs sm:text-sm text-gray-500 truncate">{user.email}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-semibold text-gray-900">${user.balance.toLocaleString()}</div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {user.createdAt.toLocaleDateString()}
-                  </td>
-                  <td className="px-3 sm:px-4 md:px-6 py-3 sm:py-4 whitespace-nowrap text-right">
-                    <div className="flex justify-end space-x-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedUser(user.id);
-                          setAmount('');
-                          setIsRechargeModalOpen(true);
-                        }}
-                        className="p-1.5 sm:p-2 text-yellow-600 hover:text-yellow-900 bg-yellow-50 hover:bg-yellow-100 rounded-full"
-                        aria-label="Agregar saldo"
-                      >
-                        <DollarSign className="w-4 h-4 sm:w-5 sm:h-5" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteUser(user.id, user.name);
-                        }}
-                        className="p-1.5 sm:p-2 text-red-600 hover:text-red-900 bg-red-50 hover:bg-red-100 rounded-full"
-                        aria-label="Eliminar usuario"
-                      >
-                        <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
 
   const renderOrders = () => {
     const getStatusColor = (status: string) => {
@@ -421,16 +690,7 @@ const handleDeleteUser = (userId: string, userName: string) => {
             >
               Dashboard
             </button>
-            <button
-              onClick={() => setActiveTab('users')}
-              className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
-                activeTab === 'users'
-                  ? 'border-yellow-500 text-yellow-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Usuarios
-            </button>
+
             <button
               onClick={() => setActiveTab('orders')}
               className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
@@ -454,6 +714,19 @@ const handleDeleteUser = (userId: string, userName: string) => {
                 Productos
               </div>
             </button>
+            <button
+              onClick={() => setActiveTab('accounts')}
+              className={`py-3 sm:py-4 px-1 border-b-2 font-medium text-sm whitespace-nowrap ${
+                activeTab === 'accounts'
+                  ? 'border-yellow-500 text-yellow-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+            >
+              <div className="flex items-center">
+                <Users className="w-4 h-4 mr-1" />
+                Cuentas
+              </div>
+            </button>
           </nav>
         </div>
 
@@ -461,12 +734,175 @@ const handleDeleteUser = (userId: string, userName: string) => {
         <div className="bg-white rounded-lg shadow-sm sm:shadow-md overflow-hidden">
           <div className="p-3 sm:p-4 md:p-6">
             {activeTab === 'dashboard' && renderDashboard()}
-            {activeTab === 'users' && renderUsers()}
+
             {activeTab === 'orders' && renderOrders()}
             {activeTab === 'products' && renderProducts()}
+            {activeTab === 'accounts' && renderAccounts()}
           </div>
         </div>
       </div>
+
+      {/* Modal de Crear Cuenta */}
+      {isCreateAccountModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Crear Nueva Cuenta Admin</h3>
+              <button 
+                onClick={() => {
+                  setIsCreateAccountModalOpen(false);
+                  setNewAccount({ name: '', email: '', password: '', role: 'admin' });
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <form onSubmit={handleCreateAccount}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nombre
+                </label>
+                <input
+                  type="text"
+                  value={newAccount.name}
+                  onChange={(e) => setNewAccount({...newAccount, name: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                  required
+                />
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email
+                </label>
+                <input
+                  type="email"
+                  value={newAccount.email}
+                  onChange={(e) => setNewAccount({...newAccount, email: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                  required
+                />
+              </div>
+              
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Contraseña
+                </label>
+                <input
+                  type="password"
+                  value={newAccount.password}
+                  onChange={(e) => setNewAccount({...newAccount, password: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                  required
+                />
+              </div>
+              
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Rol
+                </label>
+                <select
+                  value={newAccount.role}
+                  onChange={(e) => setNewAccount({...newAccount, role: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                >
+                  <option value="admin">Administrador</option>
+                  <option value="moderator">Moderador</option>
+                </select>
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsCreateAccountModalOpen(false);
+                    setNewAccount({ name: '', email: '', password: '', role: 'admin' });
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+                >
+                  Crear Cuenta
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Editar Contraseña */}
+      {isEditPasswordModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Cambiar Contraseña</h3>
+              <button 
+                onClick={() => {
+                  setIsEditPasswordModalOpen(false);
+                  setSelectedUser('');
+                  setNewPassword('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <form onSubmit={handleEditPassword}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Usuario
+                </label>
+                <input
+                  type="text"
+                  value={users.find(u => u.id === selectedUser)?.name || ''}
+                  disabled
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                />
+              </div>
+              
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nueva Contraseña
+                </label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                  required
+                />
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditPasswordModalOpen(false);
+                    setSelectedUser('');
+                    setNewPassword('');
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-sm font-medium text-white bg-yellow-500 border border-transparent rounded-md hover:bg-yellow-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500"
+                >
+                  Actualizar Contraseña
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Recarga de Saldo */}
       {isRechargeModalOpen && (

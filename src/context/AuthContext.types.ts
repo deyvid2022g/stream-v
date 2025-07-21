@@ -13,6 +13,7 @@ export interface AuthContextType extends AuthState {
   getAllUsers: () => User[];
   updateUserProfile: (userId: string, updates: Partial<User>) => void;
   deleteUser: (userId: string) => void;
+  createAdminUser: (name: string, email: string, password: string, role?: string) => boolean;
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;

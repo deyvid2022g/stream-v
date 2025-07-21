@@ -16,6 +16,23 @@ import Support from './components/Support';
 import Admin from './components/Admin';
 import NotificationToast from './components/NotificationToast';
 
+const AppContent: React.FC = () => {
+  return (
+    <AuthProvider>
+      <NotificationProvider>
+        <CartProvider>
+          <OrderProvider>
+            <ProductProvider>
+              <AppRoutes />
+              <NotificationToast />
+            </ProductProvider>
+          </OrderProvider>
+        </CartProvider>
+      </NotificationProvider>
+    </AuthProvider>
+  );
+};
+
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
@@ -55,58 +72,47 @@ const AppLayout: React.FC = () => {
   );
 };
 
-const AppContent: React.FC = () => {
+const AppRoutes: React.FC = () => {
   return (
-    <AuthProvider>
-      <NotificationProvider>
-        <CartProvider>
-          <OrderProvider>
-            <ProductProvider>
-              <Routes>
-                {/* Public routes */}
-                <Route path="/login" element={<Login />} />
-                
-                {/* Protected routes */}
-                <Route element={
-                  <ProtectedRoute>
-                    <AppLayout />
-                  </ProtectedRoute>
-                }>
-                  <Route path="/" element={<Navigate to="/store" replace />} />
-                  <Route path="/store" element={<Store />} />
-                  <Route path="/product/:id" element={<ProductDetail />} />
-                  <Route path="/account" element={<Account />} />
-                  <Route path="/cart" element={<Cart />} />
-                  <Route path="/checkout" element={<Checkout />} />
-                  <Route path="/support" element={<Support />} />
-                  <Route 
-                    path="/admin" 
-                    element={<Admin />} 
-                  />
-                </Route>
-                
-                {/* 404 route */}
-                <Route path="*" element={
-                  <div className="min-h-screen flex items-center justify-center bg-gray-900">
-                    <div className="text-center text-white">
-                      <h1 className="text-4xl font-bold mb-4">404</h1>
-                      <p className="text-xl">Página no encontrada</p>
-                      <button 
-                        onClick={() => window.history.back()}
-                        className="mt-6 px-6 py-2 bg-yellow-500 text-black rounded-lg hover:bg-yellow-400 transition-colors"
-                      >
-                        Volver atrás
-                      </button>
-                    </div>
-                  </div>
-                } />
-              </Routes>
-              <NotificationToast />
-            </ProductProvider>
-          </OrderProvider>
-        </CartProvider>
-      </NotificationProvider>
-    </AuthProvider>
+    <Routes>
+      {/* Public routes */}
+      <Route path="/login" element={<Login />} />
+      
+      {/* Protected routes */}
+      <Route element={
+        <ProtectedRoute>
+          <AppLayout />
+        </ProtectedRoute>
+      }>
+        <Route path="/" element={<Navigate to="/store" replace />} />
+        <Route path="/store" element={<Store />} />
+        <Route path="/product/:id" element={<ProductDetail />} />
+        <Route path="/account" element={<Account />} />
+        <Route path="/cart" element={<Cart />} />
+        <Route path="/checkout" element={<Checkout />} />
+        <Route path="/support" element={<Support />} />
+        <Route 
+          path="/admin" 
+          element={<Admin />} 
+        />
+      </Route>
+      
+      {/* 404 route */}
+      <Route path="*" element={
+        <div className="min-h-screen flex items-center justify-center bg-gray-900">
+          <div className="text-center text-white">
+            <h1 className="text-4xl font-bold mb-4">404</h1>
+            <p className="text-xl">Página no encontrada</p>
+            <button 
+              onClick={() => window.history.back()}
+              className="mt-6 px-6 py-2 bg-yellow-500 text-black rounded-lg hover:bg-yellow-400 transition-colors"
+            >
+              Volver atrás
+            </button>
+          </div>
+        </div>
+      } />
+    </Routes>
   );
 };
 

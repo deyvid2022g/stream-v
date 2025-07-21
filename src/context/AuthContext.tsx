@@ -176,6 +176,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const createAdminUser = (name: string, email: string, password: string, role: string = 'admin'): boolean => {
+    // Verificar si el email ya existe
+    const existingUser = users.find(u => u.email === email);
+    if (existingUser) {
+      return false; // Usuario ya existe
+    }
+
+    const newAdmin: User = {
+      id: Date.now().toString(),
+      email,
+      name,
+      role: role as 'admin' | 'user',
+      balance: 0,
+      createdAt: new Date(),
+      password: password
+    };
+
+    setUsers(prev => [...prev, newAdmin]);
+    return true;
+  };
+
   const getAllUsers = () => users;
 
   return (
@@ -190,7 +211,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         updateUserBalance,
         getAllUsers,
         updateUserProfile,
-        deleteUser
+        deleteUser,
+        createAdminUser
       }}
     >
       {children}

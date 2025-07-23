@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useOrders } from '../context/OrderContext';
 import { useNotifications } from '../context/NotificationContext';
-
-import { Users, DollarSign, CreditCard, TrendingUp, Search, Package } from 'lucide-react';
+import { Users, DollarSign, CreditCard, TrendingUp, Search, Package, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import type { OrderStatus } from '../types/order';
+import type { User } from '../context/AuthContext.types';
 import ProductManagement from './admin/ProductManagement';
 
 
@@ -27,13 +28,13 @@ const Admin: React.FC = () => {
 
   const users = getAllUsers();
   const orders = getAllOrders();
-  const regularUsers = users.filter(user => user.role === 'user');
-  const adminUsers = users.filter(user => user.role === 'admin');
+  const regularUsers = users.filter((user: User) => user.role === 'user');
+  const adminUsers = users.filter((user: User) => user.role === 'admin');
 
 
 
-  const filteredOrders = orders.filter(order => {
-    const user = users.find(u => u.id === order.userId);
+  const filteredOrders = orders.filter((order: any) => {
+    const user = users.find((u: User) => u.id === order.userId);
     return user?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
            user?.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
            order.id.includes(searchTerm);
@@ -129,7 +130,7 @@ const Admin: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {adminUsers.map(admin => (
+                {adminUsers.map((admin: User) => (
                   <tr key={admin.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">{admin.name}</div>
@@ -419,6 +420,57 @@ const Admin: React.FC = () => {
     addNotification('success', `Estado de orden actualizado a ${orderStatus}`);
   };
 
+  const handleDownloadDatabase = () => {
+    try {
+      // Crear workbook
+      const workbook = XLSX.utils.book_new();
+
+      // Preparar datos de usuarios
+       const usersData = users.map((user: User) => ({
+         ID: user.id,
+         Nombre: user.name,
+         Email: user.email,
+         Rol: user.role,
+         Saldo: user.balance,
+         'Fecha de Creación': new Date(user.createdAt).toLocaleDateString(),
+         Estado: 'Activo'
+       }));
+
+       // Preparar datos de órdenes
+       const ordersData = orders.map((order: any) => {
+         const user = users.find((u: User) => u.id === order.userId);
+        return {
+          'ID Orden': order.id,
+          'Usuario': user?.name || 'Usuario desconocido',
+          'Email Usuario': user?.email || 'N/A',
+          'Total': order.total,
+          'Estado': order.status === 'completed' ? 'Completado' :
+                   order.status === 'processing' ? 'Procesando' :
+                   order.status === 'cancelled' ? 'Cancelado' : 'Pendiente',
+          'Fecha': new Date(order.createdAt).toLocaleDateString(),
+          'Productos': order.items.map((item: any) => `${item.name} (x${item.quantity})`).join(', ')
+        };
+      });
+
+      // Crear hojas de trabajo
+      const usersWorksheet = XLSX.utils.json_to_sheet(usersData);
+      const ordersWorksheet = XLSX.utils.json_to_sheet(ordersData);
+
+      // Agregar hojas al workbook
+      XLSX.utils.book_append_sheet(workbook, usersWorksheet, 'Usuarios');
+      XLSX.utils.book_append_sheet(workbook, ordersWorksheet, 'Órdenes');
+
+      // Generar archivo y descargarlo
+      const fileName = `base_datos_${new Date().toISOString().split('T')[0]}.xlsx`;
+      XLSX.writeFile(workbook, fileName);
+
+      addNotification('success', 'Base de datos descargada exitosamente');
+    } catch (error) {
+      console.error('Error al descargar la base de datos:', error);
+      addNotification('error', 'Error al descargar la base de datos');
+    }
+  };
+
   const renderProducts = () => <ProductManagement />;
 
   const totalUsers = regularUsers.length;
@@ -476,7 +528,7 @@ const Admin: React.FC = () => {
         <div className="bg-white rounded-lg shadow-sm sm:shadow-md p-4 sm:p-6">
           <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-3 sm:mb-4">Usuarios Recientes</h3>
           <div className="space-y-2 sm:space-y-3">
-            {regularUsers.slice(0, 5).map(user => (
+            {regularUsers.slice(0, 5).map((user: User) => (
               <div key={user.id} className="flex items-center justify-between p-2 sm:p-3 bg-gray-50 rounded-lg">
                 <div className="min-w-0">
                   <p className="font-medium text-gray-800 truncate">{user.name}</p>
@@ -494,8 +546,8 @@ const Admin: React.FC = () => {
         <div className="bg-white rounded-lg shadow-sm sm:shadow-md p-4 sm:p-6">
           <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-3 sm:mb-4">Órdenes Recientes</h3>
           <div className="space-y-2 sm:space-y-3">
-            {orders.slice(0, 5).map(order => {
-              const user = users.find(u => u.id === order.userId);
+            {orders.slice(0, 5).map((order: any) => {
+              const user = users.find((u: User) => u.id === order.userId);
               return (
                 <div key={order.id} className="flex items-center justify-between p-2 sm:p-3 bg-gray-50 rounded-lg">
                   <div className="min-w-0">
@@ -574,8 +626,8 @@ const Admin: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredOrders.map(order => {
-                  const user = users.find(u => u.id === order.userId);
+                {filteredOrders.map((order: any) => {
+                  const user = users.find((u: User) => u.id === order.userId);
                   return (
                     <tr key={order.id} className="hover:bg-gray-50">
                       <td className="px-4 md:px-6 py-4 whitespace-nowrap">
@@ -618,8 +670,8 @@ const Admin: React.FC = () => {
 
         {/* Mobile Card View */}
         <div className="sm:hidden space-y-3">
-          {filteredOrders.map(order => {
-            const user = users.find(u => u.id === order.userId);
+          {filteredOrders.map((order: any) => {
+            const user = users.find((u: User) => u.id === order.userId);
             return (
               <div key={order.id} className="bg-white rounded-lg shadow p-4 border border-gray-100">
                 <div className="flex justify-between items-start">
@@ -675,7 +727,16 @@ const Admin: React.FC = () => {
   return (
     <div className="min-h-screen bg-gray-50 p-3 sm:p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-800 mb-4 sm:mb-6">Panel de Administración</h1>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 sm:mb-6 space-y-3 sm:space-y-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Panel de Administración</h1>
+          <button
+            onClick={handleDownloadDatabase}
+            className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-colors duration-200 text-sm font-medium"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Descargar Base de Datos
+          </button>
+        </div>
         
         {/* Tabs */}
         <div className="border-b border-gray-200 mb-4 sm:mb-6 overflow-x-auto">

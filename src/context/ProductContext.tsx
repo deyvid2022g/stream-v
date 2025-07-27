@@ -1,294 +1,227 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { v4 } from 'uuid';
-import { Product, CreateProductDTO, UpdateProductDTO, ProductAccount } from '../types/product';
-import { products as defaultProducts } from '../data/products';
-
-// Move constants to a separate file if they need to be shared
-const STORAGE_KEY = 'inventory_products';
-
-// Define interfaces for localStorage data
-interface StoredProductAccount extends Omit<ProductAccount, 'soldAt'> {
-  soldAt?: string;
-}
-
-interface StoredProduct extends Omit<ExtendedProduct, 'createdAt' | 'updatedAt' | 'accounts'> {
-  createdAt: string;
-  updatedAt: string;
-  accounts?: StoredProductAccount[];
-}
-
-// Extend the Product interface to include additional fields used in the context
-interface ExtendedProduct extends Product {
-  accounts?: ProductAccount[];
-  createdAt?: Date;
-  updatedAt?: Date;
-}
+import { Product, ProductAccount } from '../types';
+import { productService } from '../services/productService';
 
 interface ProductContextType {
-  products: ExtendedProduct[];
+  products: Product[];
+  productAccounts: ProductAccount[];
   loading: boolean;
   error: string | null;
-  addProduct: (productData: CreateProductDTO) => Promise<ExtendedProduct>;
-  updateProduct: (productData: UpdateProductDTO) => Promise<ExtendedProduct>;
-  deleteProduct: (productId: string) => Promise<void>;
-  getProduct: (productId: string) => ExtendedProduct | undefined;
-  addAccountsToProduct: (productId: string, accounts: { email: string; password: string }[]) => Promise<ExtendedProduct>;
-  removeAccountsFromProduct: (productId: string, accountIds: string[]) => Promise<ExtendedProduct>;
-  markAccountAsSold: (productId: string, accountId: string, orderId: string, userId: string) => Promise<ExtendedProduct>;
+  addProduct: (productData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => Promise<Product | null>;
+  updateProduct: (id: string, updates: Partial<Product>) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
+  getProductById: (productId: string) => Product | undefined;
+  addProductAccount: (productId: string, accountData: { email: string; password: string; additionalInfo?: string }) => Promise<ProductAccount>;
+  deleteProductAccount: (accountId: string) => Promise<void>;
+  markAccountAsSold: (accountId: string, orderId: string) => Promise<void>;
   getAvailableAccounts: (productId: string) => ProductAccount[];
-  getNextAvailableAccount: (productId: string) => ProductAccount | undefined;
+  getSoldAccounts: (productId: string) => ProductAccount[];
+  getAllAccounts: (productId: string) => ProductAccount[];
+  clearError: () => void;
 }
 
 const ProductContext = createContext<ProductContextType | undefined>(undefined);
 
 export const ProductProvider = ({ children }: { children: ReactNode }) => {
-  const [products, setProducts] = useState<ExtendedProduct[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productAccounts, setProductAccounts] = useState<ProductAccount[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load products from localStorage on mount
   useEffect(() => {
-    try {
-      const savedProducts = localStorage.getItem(STORAGE_KEY);
-      if (savedProducts) {
-        const parsedProducts: StoredProduct[] = JSON.parse(savedProducts);
+    const loadData = async () => {
+      try {
+        const [productsData, accountsData] = await Promise.all([
+          productService.getAllProducts(),
+          productService.getAllProductAccounts()
+        ]);
         
-        // Convert string dates back to Date objects
-        const productsWithDates = parsedProducts.map((product) => ({
-          ...product,
-          accounts: product.accounts?.map(acc => ({
-            ...acc,
-            soldAt: acc.soldAt ? new Date(acc.soldAt) : undefined
-          })),
-          createdAt: new Date(product.createdAt),
-          updatedAt: new Date(product.updatedAt)
+        // Convertir ProductWithAccounts a Product incluyendo las cuentas
+        const products: Product[] = productsData.map(p => ({
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          price: p.price,
+          discount: p.discount,
+          image: p.image,
+          category: p.category,
+          duration: p.duration,
+          accounts: p.accounts || [] // Incluir las cuentas en el producto
         }));
         
-        setProducts(productsWithDates);
-      } else {
-        // If no saved products, load default products
-        const extendedDefaultProducts: ExtendedProduct[] = defaultProducts.map(product => ({
-          ...product,
-          accounts: [],
-          createdAt: new Date(),
-          updatedAt: new Date()
-        }));
-        setProducts(extendedDefaultProducts);
+        setProducts(products);
+        setProductAccounts(accountsData);
+      } catch (error) {
+        console.error('Error loading products data:', error);
+        setError('Error loading products');
+      } finally {
+        setLoading(false);
       }
-    } catch (err) {
-      setError('Error loading products');
-      console.error('Error loading products:', err);
-    } finally {
-      setLoading(false);
-    }
+    };
+
+    loadData();
   }, []);
 
-  // Save products to localStorage whenever they change
-  useEffect(() => {
-    if (!loading) {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(products));
-      } catch (err) {
-        console.error('Error saving products:', err);
+  const addProduct = async (productData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
+    try {
+      const newProduct = await productService.createProduct(productData);
+      if (newProduct) {
+        setProducts(prev => [...prev, newProduct]);
       }
-    }
-  }, [products, loading]);
-
-  const addProduct = async (productData: CreateProductDTO): Promise<ExtendedProduct> => {
-    try {
-      const initialAccounts = productData.initialAccounts || [];
-      const newProduct: ExtendedProduct = {
-        ...productData,
-        id: v4(),
-        // Stock is now determined by the number of available (unsold) accounts
-        stock: initialAccounts.length,
-        accounts: initialAccounts.map(acc => ({
-          id: v4(),
-          email: acc.email,
-          password: acc.password,
-          isSold: false,
-          soldAt: undefined,
-          orderId: undefined,
-          soldTo: undefined
-        })),
-        createdAt: new Date(),
-        updatedAt: new Date()
-      };
-
-      setProducts(prev => [...prev, newProduct]);
       return newProduct;
-    } catch (err) {
+    } catch (error) {
+      console.error('Error adding product:', error);
       setError('Error adding product');
-      console.error('Error adding product:', err);
-      throw err;
+      throw error;
     }
   };
 
-  const updateProduct = async (productData: UpdateProductDTO): Promise<ExtendedProduct> => {
+  const updateProduct = async (id: string, updates: Partial<Product>) => {
     try {
-      const { id, addAccounts, removeAccountIds, ...updates } = productData;
-      
-      setProducts(prev => {
-        const productIndex = prev.findIndex(p => p.id === id);
-        if (productIndex === -1) throw new Error('Product not found');
-
-        const product = prev[productIndex];
-        let accounts = [...(product.accounts || [])];
-        
-        // Add new accounts if any
-        const newAccounts = (addAccounts || []).map(acc => ({
-          id: v4(),
-          email: acc.email,
-          password: acc.password,
-          isSold: false,
-          soldAt: undefined,
-          orderId: undefined,
-          soldTo: undefined
-        }));
-        
-        // Remove accounts if any
-        if (removeAccountIds && removeAccountIds.length > 0) {
-          accounts = accounts.filter(acc => !removeAccountIds.includes(acc.id));
-        }
-        
-        // Combine existing and new accounts
-        const updatedAccounts = [...accounts, ...newAccounts];
-        
-        // Stock is now the total number of accounts (both sold and unsold)
-        // Available stock is calculated by filtering unsold accounts
-        const availableAccounts = updatedAccounts.filter(acc => !acc.isSold).length;
-        
-        const updatedProduct: ExtendedProduct = {
-          ...product,
-          ...updates,
-          accounts: updatedAccounts,
-          // Keep the original stock field for backward compatibility
-          // but it will be calculated based on available accounts
-          stock: availableAccounts,
-          updatedAt: new Date()
-        };
-
-        const newProducts = [...prev];
-        newProducts[productIndex] = updatedProduct;
-        return newProducts;
-      });
-
-      const updated = products.find(p => p.id === id);
-      if (!updated) throw new Error('Failed to update product');
-      return updated;
-    } catch (err) {
+      await productService.updateProduct(id, updates);
+      setProducts(prev => prev.map(product => 
+        product.id === id ? { ...product, ...updates } : product
+      ));
+    } catch (error) {
+      console.error('Error updating product:', error);
       setError('Error updating product');
-      console.error('Error updating product:', err);
-      throw err;
+      throw error;
     }
   };
 
-  const deleteProduct = async (productId: string): Promise<void> => {
+  const deleteProduct = async (id: string) => {
     try {
-      setProducts(prev => prev.filter(p => p.id !== productId));
-    } catch (err) {
+      await productService.deleteProduct(id);
+      setProducts(prev => prev.filter(product => product.id !== id));
+      // También eliminar las cuentas asociadas del estado local
+      setProductAccounts(prev => prev.filter(account => account.productId !== id));
+    } catch (error) {
+      console.error('Error deleting product:', error);
       setError('Error deleting product');
-      console.error('Error deleting product:', err);
-      throw err;
+      throw error;
     }
   };
 
-  const getProduct = (productId: string): ExtendedProduct | undefined => {
+  const getProductById = (productId: string): Product | undefined => {
     return products.find(p => p.id === productId);
   };
 
-  const addAccountsToProduct = async (productId: string, accounts: { email: string; password: string }[]): Promise<ExtendedProduct> => {
-    return updateProduct({
-      id: productId,
-      addAccounts: accounts
-    });
-  };
-
-  const removeAccountsFromProduct = async (productId: string, accountIds: string[]): Promise<ExtendedProduct> => {
-    return updateProduct({
-      id: productId,
-      removeAccountIds: accountIds
-    });
-  };
-
-
-
-  const markAccountAsSold = async (productId: string, accountId: string, orderId: string, userId: string): Promise<ExtendedProduct> => {
+  const addProductAccount = async (productId: string, accountData: { email: string; password: string; additionalInfo?: string }) => {
     try {
-      setProducts(prev => {
-        const productIndex = prev.findIndex(p => p.id === productId);
-        if (productIndex === -1) throw new Error('Product not found');
+      const newAccount = await productService.addProductAccount(productId, accountData);
+      if (newAccount) {
+        const accountWithProductId = { ...newAccount, productId };
+        setProductAccounts(prev => [...prev, accountWithProductId]);
+        
+        // También actualizar el producto para incluir la nueva cuenta
+        setProducts(prev => prev.map(product => 
+          product.id === productId 
+            ? { ...product, accounts: [...(product.accounts || []), accountWithProductId] }
+            : product
+        ));
+        
+        return accountWithProductId;
+      }
+      throw new Error('Failed to create account');
+    } catch (error) {
+      console.error('Error adding product account:', error);
+      throw error;
+    }
+  };
 
-        const product = prev[productIndex];
-        const accountIndex = (product.accounts || []).findIndex(acc => acc.id === accountId);
-        if (accountIndex === -1) throw new Error('Account not found');
-        
-        const account = product.accounts?.[accountIndex];
-        if (!account) throw new Error('Account not found');
-        
-        // Check if the account is already sold
-        if (product.accounts?.[accountIndex]?.isSold) {
-          console.warn('Account already marked as sold:', accountId);
-          return prev; // Return previous state if already sold
-        }
+  const deleteProductAccount = async (accountId: string) => {
+    try {
+      await productService.deleteProductAccount(accountId);
+      
+      // Encontrar la cuenta que se va a eliminar para obtener el productId
+      const accountToDelete = productAccounts.find(acc => acc.id === accountId);
+      
+      setProductAccounts(prev => prev.filter(account => account.id !== accountId));
+      
+      // También eliminar la cuenta del producto correspondiente
+      if (accountToDelete) {
+        setProducts(prev => prev.map(product => 
+          product.id === accountToDelete.productId 
+            ? { ...product, accounts: (product.accounts || []).filter(acc => acc.id !== accountId) }
+            : product
+        ));
+      }
+    } catch (error) {
+      console.error('Error deleting product account:', error);
+      throw error;
+    }
+  };
 
-        const updatedAccounts = [...(product.accounts || [])];
-        updatedAccounts[accountIndex] = {
-          ...updatedAccounts[accountIndex],
-          isSold: true,
-          soldAt: new Date(),
-          orderId,
-          soldTo: userId
-        };
-        
-        const availableAccounts = updatedAccounts.filter(acc => !acc.isSold).length;
-        
-        const updatedProduct: ExtendedProduct = {
-          ...product,
-          accounts: updatedAccounts,
-          stock: availableAccounts, // Update stock to reflect available accounts
-          updatedAt: new Date()
-        };
-        
-        const newProducts = [...prev];
-        newProducts[productIndex] = updatedProduct;
-        return newProducts;
-      });
 
-      const updatedProduct = products.find(p => p.id === productId);
-      if (!updatedProduct) throw new Error('Failed to update product');
-      return updatedProduct;
-    } catch (err) {
-      console.error('Error marking account as sold:', err);
-      throw err;
+
+  const markAccountAsSold = async (accountId: string, orderId: string) => {
+    try {
+      await productService.markAccountAsSold(accountId, orderId);
+      
+      // Encontrar la cuenta para obtener el productId
+      const accountToUpdate = productAccounts.find(acc => acc.id === accountId);
+      
+      setProductAccounts(prev => prev.map(account => 
+        account.id === accountId 
+          ? { ...account, isSold: true, soldAt: new Date(), orderId }
+          : account
+      ));
+      
+      // También actualizar la cuenta en el producto correspondiente
+      if (accountToUpdate) {
+        setProducts(prev => prev.map(product => 
+          product.id === accountToUpdate.productId 
+            ? { 
+                ...product, 
+                accounts: (product.accounts || []).map(acc => 
+                  acc.id === accountId 
+                    ? { ...acc, isSold: true, soldAt: new Date(), orderId }
+                    : acc
+                )
+              }
+            : product
+        ));
+      }
+    } catch (error) {
+      console.error('Error marking account as sold:', error);
+      throw error;
     }
   };
 
   const getAvailableAccounts = (productId: string): ProductAccount[] => {
-    const product = products.find(p => p.id === productId);
-    return product?.accounts?.filter(acc => !acc.isSold) || [];
+    return productAccounts.filter(acc => acc.productId === productId && !acc.isSold);
   };
 
-  const getNextAvailableAccount = (productId: string): ProductAccount | undefined => {
-    const availableAccounts = getAvailableAccounts(productId);
-    return availableAccounts.length > 0 ? availableAccounts[0] : undefined;
+  const getSoldAccounts = (productId: string): ProductAccount[] => {
+    return productAccounts.filter(acc => acc.productId === productId && acc.isSold);
+  };
+
+  const getAllAccounts = (productId: string): ProductAccount[] => {
+    return productAccounts.filter(acc => acc.productId === productId);
+  };
+
+  const clearError = () => {
+    setError(null);
   };
 
   return (
     <ProductContext.Provider
       value={{
         products,
+        productAccounts,
         loading,
         error,
         addProduct,
         updateProduct,
         deleteProduct,
-        getProduct,
-        addAccountsToProduct,
-        removeAccountsFromProduct,
+        getProductById,
+        addProductAccount,
+        deleteProductAccount,
         markAccountAsSold,
         getAvailableAccounts,
-        getNextAvailableAccount,
+        getSoldAccounts,
+        getAllAccounts,
+        clearError,
       }}
     >
       {children}
@@ -297,10 +230,13 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
 };
 
 // Export the hook in a separate statement to fix Fast Refresh warning
-export const useProducts = (): ProductContextType => {
+const useProducts = (): ProductContextType => {
   const context = useContext(ProductContext);
   if (context === undefined) {
     throw new Error('useProducts must be used within a ProductProvider');
   }
   return context;
 };
+
+export { useProducts };
+export default ProductContext;

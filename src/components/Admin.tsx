@@ -2,25 +2,28 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useOrders } from '../context/OrderContext';
 import { useNotifications } from '../context/NotificationContext';
+import { useProducts } from '../context/ProductContext';
 import { Users, DollarSign, CreditCard, TrendingUp, Search, Package, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { OrderStatus } from '../types/order';
-import type { User } from '../context/AuthContext.types';
+import type { User, Product, ProductAccount } from '../types';
+import type { OrderWithItems } from '../services/orderService';
 import ProductManagement from './admin/ProductManagement';
 
 
 
 const Admin: React.FC = () => {
-  const { getAllUsers, updateUserBalance, deleteUser, createAdminUser } = useAuth();
+  const { getAllUsers, updateSpecificUserBalance, deleteUser, createAdminUser } = useAuth();
   const { getAllOrders, updateOrderStatus } = useOrders();
   const { addNotification } = useNotifications();
+  const { products } = useProducts();
   
   const [activeTab, setActiveTab] = useState('dashboard');
   const [searchTerm, setSearchTerm] = useState('');
   const [isCreateAccountModalOpen, setIsCreateAccountModalOpen] = useState(false);
   const [isEditPasswordModalOpen, setIsEditPasswordModalOpen] = useState(false);
 
-  const [newAccount, setNewAccount] = useState({ name: '', email: '', password: '', role: 'admin' });
+  const [newAccount, setNewAccount] = useState({ username: '', email: '', password: '', is_admin: true });
   const [newPassword, setNewPassword] = useState('');
   const [selectedUser, setSelectedUser] = useState('');
   const [amount, setAmount] = useState('');
@@ -28,52 +31,61 @@ const Admin: React.FC = () => {
 
   const users = getAllUsers();
   const orders = getAllOrders();
-  const regularUsers = users.filter((user: User) => user.role === 'user');
-  const adminUsers = users.filter((user: User) => user.role === 'admin');
+  const regularUsers = users.filter((user: User) => !user.is_admin);
+  const adminUsers = users.filter((user: User) => user.is_admin);
 
 
 
-  const filteredOrders = orders.filter((order: any) => {
+  const filteredOrders = orders.filter((order: OrderWithItems) => {
     const user = users.find((u: User) => u.id === order.userId);
-    return user?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    return user?.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
            user?.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
            order.id.includes(searchTerm);
   });
 
 
 
-  const handleRechargeBalance = (e: React.FormEvent) => {
+  const handleRechargeBalance = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUser || !amount) return;
     
     const amountNumber = parseFloat(amount);
     if (isNaN(amountNumber) || amountNumber <= 0) {
-      alert('Por favor ingresa un monto válido');
+      addNotification('error', 'Por favor ingresa un monto válido');
       return;
     }
     
     const user = users.find(u => u.id === selectedUser);
     if (!user) return;
     
-    const newBalance = (user.balance || 0) + amountNumber;
-    updateUserBalance(selectedUser, newBalance);
-    setAmount('');
-    setSelectedUser('');
-    setIsRechargeModalOpen(false);
-    alert(`Saldo actualizado a $${newBalance.toFixed(2)} para ${user.name}`);
+    try {
+      const newBalance = (user.balance || 0) + amountNumber;
+      await updateSpecificUserBalance(selectedUser, newBalance);
+      
+      setAmount('');
+      setSelectedUser('');
+      setIsRechargeModalOpen(false);
+      addNotification('success', `Saldo actualizado a $${newBalance.toFixed(2)} para ${user.username}`);
+    } catch {
+      addNotification('error', 'Error al actualizar el saldo');
+    }
   };
 
-  const handleCreateAccount = (e: React.FormEvent) => {
+  const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newAccount.name && newAccount.email && newAccount.password) {
-      const success = createAdminUser(newAccount.name, newAccount.email, newAccount.password, newAccount.role);
-      
-      if (success) {
-        setIsCreateAccountModalOpen(false);
-        setNewAccount({ name: '', email: '', password: '', role: 'admin' });
-        alert('Cuenta admin creada exitosamente');
-      } else {
-        alert('Error: Ya existe un usuario con ese email');
+    if (newAccount.username && newAccount.email && newAccount.password) {
+      try {
+        const success = await createAdminUser(newAccount.username, newAccount.email, newAccount.password, newAccount.is_admin);
+        
+        if (success) {
+          setIsCreateAccountModalOpen(false);
+          setNewAccount({ username: '', email: '', password: '', is_admin: true });
+          addNotification('success', 'Cuenta admin creada exitosamente');
+        } else {
+          addNotification('error', 'Error: Ya existe un usuario con ese email');
+        }
+      } catch {
+        addNotification('error', 'Error al crear la cuenta admin');
       }
     }
   };
@@ -93,10 +105,14 @@ const Admin: React.FC = () => {
 
 
 
-  const handleDeleteUser = (userId: string) => {
+  const handleDeleteUser = async (userId: string) => {
     if (window.confirm('¿Estás seguro de que quieres eliminar esta cuenta de usuario? Esta acción no se puede deshacer.')) {
-      deleteUser(userId);
-      alert('Usuario eliminado exitosamente');
+      try {
+        await deleteUser(userId);
+        addNotification('success', 'Usuario eliminado exitosamente');
+      } catch {
+        addNotification('error', 'Error al eliminar el usuario');
+      }
     }
   };
 
@@ -133,7 +149,7 @@ const Admin: React.FC = () => {
                 {adminUsers.map((admin: User) => (
                   <tr key={admin.id} className="hover:bg-gray-50">
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{admin.name}</div>
+                      <div className="text-sm font-medium text-gray-900">{admin.username}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900">{admin.email}</div>
@@ -144,7 +160,7 @@ const Admin: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {admin.createdAt.toLocaleDateString()}
+                      {new Date(admin.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       Nunca
@@ -196,7 +212,7 @@ const Admin: React.FC = () => {
                {users.map(user => (
                  <tr key={user.id} className="hover:bg-gray-50">
                    <td className="px-6 py-4 whitespace-nowrap">
-                     <div className="text-sm font-medium text-gray-900">{user.name}</div>
+                     <div className="text-sm font-medium text-gray-900">{user.username}</div>
                    </td>
                    <td className="px-6 py-4 whitespace-nowrap">
                      <div className="text-sm text-gray-900">{user.email}</div>
@@ -210,7 +226,7 @@ const Admin: React.FC = () => {
                      </span>
                    </td>
                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                     {user.createdAt.toLocaleDateString()}
+                     {new Date(user.createdAt).toLocaleDateString()}
                    </td>
                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                      <div className="flex space-x-2">
@@ -256,7 +272,7 @@ const Admin: React.FC = () => {
               <button 
                 onClick={() => {
                   setIsCreateAccountModalOpen(false);
-                  setNewAccount({ name: '', email: '', password: '', role: 'admin' });
+                  setNewAccount({ username: '', email: '', password: '', is_admin: true });
                 }}
                 className="text-gray-500 hover:text-gray-700"
               >
@@ -271,8 +287,8 @@ const Admin: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={newAccount.name}
-                  onChange={(e) => setNewAccount({...newAccount, name: e.target.value})}
+                  value={newAccount.username}
+                  onChange={(e) => setNewAccount({...newAccount, username: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
                   required
                 />
@@ -309,12 +325,12 @@ const Admin: React.FC = () => {
                   Rol
                 </label>
                 <select
-                  value={newAccount.role}
-                  onChange={(e) => setNewAccount({...newAccount, role: e.target.value})}
+                  value={newAccount.is_admin ? 'admin' : 'user'}
+                  onChange={(e) => setNewAccount({...newAccount, is_admin: e.target.value === 'admin'})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
                 >
                   <option value="admin">Administrador</option>
-                  <option value="moderator">Moderador</option>
+                  <option value="user">Usuario</option>
                 </select>
               </div>
               
@@ -323,7 +339,7 @@ const Admin: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setIsCreateAccountModalOpen(false);
-                    setNewAccount({ name: '', email: '', password: '', role: 'admin' });
+                    setNewAccount({ username: '', email: '', password: '', is_admin: true });
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
                 >
@@ -366,7 +382,7 @@ const Admin: React.FC = () => {
                  </label>
                  <input
                    type="text"
-                   value={users.find(u => u.id === selectedUser)?.name || ''}
+                   value={users.find(u => u.id === selectedUser)?.username || ''}
                    disabled
                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
                  />
@@ -428,43 +444,123 @@ const Admin: React.FC = () => {
       // Preparar datos de usuarios
        const usersData = users.map((user: User) => ({
          ID: user.id,
-         Nombre: user.name,
+         Nombre: user.username,
          Email: user.email,
-         Rol: user.role,
+         Rol: user.is_admin ? 'Admin' : 'Usuario',
          Saldo: user.balance,
          'Fecha de Creación': new Date(user.createdAt).toLocaleDateString(),
          Estado: 'Activo'
        }));
 
        // Preparar datos de órdenes
-       const ordersData = orders.map((order: any) => {
+       const ordersData = orders.map((order: OrderWithItems) => {
          const user = users.find((u: User) => u.id === order.userId);
         return {
           'ID Orden': order.id,
-          'Usuario': user?.name || 'Usuario desconocido',
+          'Usuario': user?.username || 'Usuario desconocido',
           'Email Usuario': user?.email || 'N/A',
           'Total': order.total,
           'Estado': order.status === 'completed' ? 'Completado' :
                    order.status === 'processing' ? 'Procesando' :
                    order.status === 'cancelled' ? 'Cancelado' : 'Pendiente',
           'Fecha': new Date(order.createdAt).toLocaleDateString(),
-          'Productos': order.items.map((item: any) => `${item.name} (x${item.quantity})`).join(', ')
+          'Productos': order.items.map(item => `${item.name} (x${item.quantity})`).join(', ')
         };
+      });
+
+      // Preparar datos de productos
+      const productsData = products.map((product: Product) => ({
+        'ID Producto': product.id,
+        'Nombre': product.name,
+        'Categoría': product.category,
+        'Precio': product.price,
+        'Stock Total': product.accounts?.length || 0,
+        'Stock Disponible': product.accounts?.filter((acc: ProductAccount) => !acc.isSold).length || 0,
+        'Stock Vendido': product.accounts?.filter((acc: ProductAccount) => acc.isSold).length || 0,
+        'Descripción': product.description,
+        'Duración': product.duration,
+        'Fecha Creación': 'N/A'
+      }));
+
+      // Preparar datos de cuentas disponibles (en stock)
+      const availableAccountsData: Array<{
+        'ID Cuenta': string;
+        'Producto': string;
+        'Email': string;
+        'Contraseña': string;
+        'Estado': string;
+        'Fecha Agregada': string;
+      }> = [];
+      products.forEach((product: Product) => {
+        if (product.accounts) {
+          product.accounts
+            .filter((acc: ProductAccount) => !acc.isSold)
+            .forEach((account: ProductAccount) => {
+              availableAccountsData.push({
+                'ID Cuenta': account.id,
+                'Producto': product.name,
+                'Email': account.email,
+                'Contraseña': account.password,
+                'Estado': 'Disponible',
+                'Fecha Agregada': 'N/A'
+              });
+            });
+        }
+      });
+
+      // Preparar datos de cuentas vendidas
+      const soldAccountsData: Array<{
+        'ID Cuenta': string;
+        'Producto': string;
+        'Email': string;
+        'Contraseña': string;
+        'Cliente': string;
+        'Email Cliente': string;
+        'ID Orden': string;
+        'Fecha Venta': string;
+        'Total Orden': number;
+      }> = [];
+      products.forEach((product: Product) => {
+        if (product.accounts) {
+          product.accounts
+            .filter((acc: ProductAccount) => acc.isSold)
+            .forEach((account: ProductAccount) => {
+              const user = users.find((u: User) => u.id === account.soldTo);
+              const order = orders.find((o: OrderWithItems) => o.id === account.orderId);
+              soldAccountsData.push({
+                'ID Cuenta': account.id,
+                'Producto': product.name,
+                'Email': account.email,
+                'Contraseña': account.password,
+                'Cliente': user?.username || 'Usuario desconocido',
+                'Email Cliente': user?.email || 'N/A',
+                'ID Orden': account.orderId || 'N/A',
+                'Fecha Venta': account.soldAt ? new Date(account.soldAt).toLocaleDateString() : 'N/A',
+                'Total Orden': order?.total || 0
+              });
+            });
+        }
       });
 
       // Crear hojas de trabajo
       const usersWorksheet = XLSX.utils.json_to_sheet(usersData);
       const ordersWorksheet = XLSX.utils.json_to_sheet(ordersData);
+      const productsWorksheet = XLSX.utils.json_to_sheet(productsData);
+      const availableAccountsWorksheet = XLSX.utils.json_to_sheet(availableAccountsData);
+      const soldAccountsWorksheet = XLSX.utils.json_to_sheet(soldAccountsData);
 
       // Agregar hojas al workbook
       XLSX.utils.book_append_sheet(workbook, usersWorksheet, 'Usuarios');
       XLSX.utils.book_append_sheet(workbook, ordersWorksheet, 'Órdenes');
+      XLSX.utils.book_append_sheet(workbook, productsWorksheet, 'Productos');
+      XLSX.utils.book_append_sheet(workbook, availableAccountsWorksheet, 'Cuentas Disponibles');
+      XLSX.utils.book_append_sheet(workbook, soldAccountsWorksheet, 'Cuentas Vendidas');
 
       // Generar archivo y descargarlo
-      const fileName = `base_datos_${new Date().toISOString().split('T')[0]}.xlsx`;
+      const fileName = `base_datos_completa_${new Date().toISOString().split('T')[0]}.xlsx`;
       XLSX.writeFile(workbook, fileName);
 
-      addNotification('success', 'Base de datos descargada exitosamente');
+      addNotification('success', 'Base de datos completa descargada exitosamente');
     } catch (error) {
       console.error('Error al descargar la base de datos:', error);
       addNotification('error', 'Error al descargar la base de datos');
@@ -531,7 +627,7 @@ const Admin: React.FC = () => {
             {regularUsers.slice(0, 5).map((user: User) => (
               <div key={user.id} className="flex items-center justify-between p-2 sm:p-3 bg-gray-50 rounded-lg">
                 <div className="min-w-0">
-                  <p className="font-medium text-gray-800 truncate">{user.name}</p>
+                  <p className="font-medium text-gray-800 truncate">{user.username}</p>
                   <p className="text-xs sm:text-sm text-gray-600 truncate">{user.email}</p>
                 </div>
                 <div className="text-right ml-2">
@@ -546,13 +642,13 @@ const Admin: React.FC = () => {
         <div className="bg-white rounded-lg shadow-sm sm:shadow-md p-4 sm:p-6">
           <h3 className="text-base sm:text-lg font-semibold text-gray-800 mb-3 sm:mb-4">Órdenes Recientes</h3>
           <div className="space-y-2 sm:space-y-3">
-            {orders.slice(0, 5).map((order: any) => {
+            {orders.slice(0, 5).map((order: OrderWithItems) => {
               const user = users.find((u: User) => u.id === order.userId);
               return (
                 <div key={order.id} className="flex items-center justify-between p-2 sm:p-3 bg-gray-50 rounded-lg">
                   <div className="min-w-0">
                     <p className="font-medium text-gray-800">#{order.id.slice(-6)}</p>
-                    <p className="text-xs sm:text-sm text-gray-600 truncate">{user?.name || 'Usuario desconocido'}</p>
+                    <p className="text-xs sm:text-sm text-gray-600 truncate">{user?.username || 'Usuario desconocido'}</p>
                   </div>
                   <div className="text-right ml-2">
                     <p className="text-sm sm:text-base font-semibold text-gray-800">${order.total.toLocaleString()}</p>
@@ -626,7 +722,7 @@ const Admin: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredOrders.map((order: any) => {
+                {filteredOrders.map((order: OrderWithItems) => {
                   const user = users.find((u: User) => u.id === order.userId);
                   return (
                     <tr key={order.id} className="hover:bg-gray-50">
@@ -634,7 +730,7 @@ const Admin: React.FC = () => {
                         <div className="text-sm font-medium text-gray-900">#{order.id.slice(-6)}</div>
                       </td>
                       <td className="px-4 md:px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{user?.name}</div>
+                        <div className="text-sm font-medium text-gray-900">{user?.username}</div>
                         <div className="text-xs text-gray-500 truncate max-w-[180px]">{user?.email}</div>
                       </td>
                       <td className="px-4 md:px-6 py-4 whitespace-nowrap">
@@ -670,7 +766,7 @@ const Admin: React.FC = () => {
 
         {/* Mobile Card View */}
         <div className="sm:hidden space-y-3">
-          {filteredOrders.map((order: any) => {
+          {filteredOrders.map((order: OrderWithItems) => {
             const user = users.find((u: User) => u.id === order.userId);
             return (
               <div key={order.id} className="bg-white rounded-lg shadow p-4 border border-gray-100">
@@ -688,7 +784,7 @@ const Admin: React.FC = () => {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-medium text-gray-900">{user?.name}</div>
+                    <div className="text-sm font-medium text-gray-900">{user?.username}</div>
                     <div className="text-xs text-gray-500 truncate max-w-[120px]">{user?.email}</div>
                   </div>
                 </div>
@@ -812,7 +908,7 @@ const Admin: React.FC = () => {
               <button 
                 onClick={() => {
                   setIsCreateAccountModalOpen(false);
-                  setNewAccount({ name: '', email: '', password: '', role: 'admin' });
+                  setNewAccount({ username: '', email: '', password: '', is_admin: true });
                 }}
                 className="text-gray-500 hover:text-gray-700"
               >
@@ -827,8 +923,8 @@ const Admin: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={newAccount.name}
-                  onChange={(e) => setNewAccount({...newAccount, name: e.target.value})}
+                  value={newAccount.username}
+                  onChange={(e) => setNewAccount({...newAccount, username: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
                   required
                 />
@@ -865,12 +961,12 @@ const Admin: React.FC = () => {
                   Rol
                 </label>
                 <select
-                  value={newAccount.role}
-                  onChange={(e) => setNewAccount({...newAccount, role: e.target.value})}
+                  value={newAccount.is_admin ? 'admin' : 'user'}
+                  onChange={(e) => setNewAccount({...newAccount, is_admin: e.target.value === 'admin'})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
                 >
                   <option value="admin">Administrador</option>
-                  <option value="moderator">Moderador</option>
+                  <option value="user">Usuario</option>
                 </select>
               </div>
               
@@ -879,7 +975,7 @@ const Admin: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setIsCreateAccountModalOpen(false);
-                    setNewAccount({ name: '', email: '', password: '', role: 'admin' });
+                    setNewAccount({ username: '', email: '', password: '', is_admin: true });
                   }}
                   className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
                 >
@@ -922,7 +1018,7 @@ const Admin: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={users.find(u => u.id === selectedUser)?.name || ''}
+                  value={users.find(u => u.id === selectedUser)?.username || ''}
                   disabled
                   className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
                 />
@@ -990,7 +1086,7 @@ const Admin: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={users.find(u => u.id === selectedUser)?.name || ''}
+                  value={users.find(u => u.id === selectedUser)?.username || ''}
                   disabled
                   className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
                 />

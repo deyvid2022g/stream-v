@@ -185,12 +185,7 @@ const Checkout: React.FC = () => {
             // Marcar cada cuenta como vendida
             for (const account of accountsToSell) {
               try {
-                await markAccountAsSold(
-                  product.id,
-                  account.id,
-                  order.id,
-                  user!.id
-                );
+                await markAccountAsSold(account.id, order.id);
                 markedAccounts.push({
                   productId: product.id,
                   accountId: account.id,
@@ -244,12 +239,19 @@ const Checkout: React.FC = () => {
         }
       };
 
-      // Crear la orden y pasar la función para marcar cuentas como vendidas
-      const order = await createOrder(itemsToPurchase, total, markAccountsAsSold);
+      // Crear la orden
+      const order = await createOrder(itemsToPurchase);
+      
+      if (!order) {
+        throw new Error('No se pudo crear la orden');
+      }
+      
+      // Marcar las cuentas como vendidas después de crear la orden
+      await markAccountsAsSold(order);
       
       // Actualizar el saldo del usuario
       const newBalance = user.balance - total;
-      await updateUserBalance(user.id, newBalance);
+      await updateUserBalance(newBalance);
       
       // Eliminar solo los artículos comprados del carrito
       itemsToProcess.forEach(itemId => removeFromCart(itemId));

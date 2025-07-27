@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, Eye, EyeOff, ChevronDown, ChevronUp, X } from 'lucide-react';
 import { useProducts } from '../../context/ProductContext';
-import { CreateProductDTO, ProductAccount } from '../../types/product';
-import { Product } from '../../types';
+import { CreateProductDTO } from '../../types/product';
+import { Product, ProductAccount } from '../../types';
 import { useNotifications } from '../../context/NotificationContext';
 
 const ProductManagement = () => {
-  const { products, loading, error, addProduct, updateProduct, deleteProduct } = useProducts();
+  const { products, loading, error, addProduct, updateProduct, deleteProduct, addProductAccount, deleteProductAccount, getAllAccounts } = useProducts();
   const { addNotification } = useNotifications();
   
   const [isAddingProduct, setIsAddingProduct] = useState(false);
@@ -96,24 +96,20 @@ const ProductManagement = () => {
     ]);
   };
   
-  const removeAccount = async (productId: string, accountId: string) => {
+  const removeAccount = async (accountId: string) => {
     if (window.confirm('¿Estás seguro de que deseas eliminar esta cuenta? Esta acción no se puede deshacer.')) {
       try {
-        const product = products.find(p => p.id === productId);
-        if (!product) throw new Error('Producto no encontrado');
+        // Check if it's a new account that hasn't been saved yet
+        const accountInState = newAccounts.find(acc => acc.id === accountId);
         
-        // If it's a new account that hasn't been saved yet
-        const isNewAccount = newAccounts.some(acc => acc.id === accountId && acc.isNew === false);
-        
-        if (isNewAccount) {
+        if (accountInState && accountInState.isNew) {
           // Just remove it from the local state if it's new
           setNewAccounts(prev => prev.filter(acc => acc.id !== accountId));
         } else {
-          // Otherwise, mark it for deletion in the backend
-          await updateProduct({
-            id: productId,
-            removeAccountIds: [accountId]
-          });
+          // Otherwise, delete it from the backend
+          await deleteProductAccount(accountId);
+          // Also remove from local state
+          setNewAccounts(prev => prev.filter(acc => acc.id !== accountId));
           addNotification('success', 'Cuenta eliminada correctamente');
         }
       } catch (err) {
@@ -132,25 +128,36 @@ const ProductManagement = () => {
     e.preventDefault();
     
     try {
-      // Filter out empty accounts and format them for the API
-      const validAccounts = newAccounts
-        .filter(acc => acc.email && acc.password)
+      // Filter out empty accounts and only process new accounts
+      const validNewAccounts = newAccounts
+        .filter(acc => acc.isNew && acc.email && acc.password)
         .map(({ email, password }) => ({ email, password }));
       
       if (editingProduct) {
         // Update existing product
-        await updateProduct({
-          id: editingProduct.id,
-          ...formData,
-          addAccounts: validAccounts.length ? validAccounts : undefined
-        });
+        await updateProduct(editingProduct.id, formData);
+        
+        // Add only new accounts if any
+        if (validNewAccounts.length > 0) {
+          for (const account of validNewAccounts) {
+            await addProductAccount(editingProduct.id, account);
+          }
+        }
         addNotification('success', 'Producto actualizado correctamente');
       } else {
         // Add new product
-        await addProduct({
-          ...formData,
-          initialAccounts: validAccounts
-        });
+        const newProduct = await addProduct(formData);
+        
+        // Add all valid accounts to the new product
+        const allValidAccounts = newAccounts
+          .filter(acc => acc.email && acc.password)
+          .map(({ email, password }) => ({ email, password }));
+        
+        if (newProduct && allValidAccounts.length > 0) {
+          for (const account of allValidAccounts) {
+            await addProductAccount(newProduct.id, account);
+          }
+        }
         addNotification('success', 'Producto agregado correctamente');
       }
       
@@ -196,25 +203,26 @@ const ProductManagement = () => {
       setImageFile(null);
     }
     
-    // Set existing accounts for editing
-    if (product.accounts && product.accounts.length > 0) {
-      const existingAccounts = product.accounts
-        .filter(acc => !acc.isSold)
-        .map(acc => ({
+    // Set existing accounts for editing - Fixed logic
+    const productAccounts = getAllAccounts(product.id);
+    if (productAccounts && productAccounts.length > 0) {
+      const existingAccounts = productAccounts
+        .filter((acc: ProductAccount) => !acc.isSold)
+        .map((acc: ProductAccount) => ({
+          id: acc.id,
           email: acc.email,
-          password: acc.password
+          password: acc.password,
+          isNew: false
         }));
       
-      setNewAccounts(existingAccounts.length > 0 ? existingAccounts : [{ email: '', password: '' }]);
+      // Add existing accounts plus one empty field for new accounts
+      setNewAccounts([...existingAccounts, { email: '', password: '', isNew: true }]);
     } else {
-      setNewAccounts([{ email: '', password: '' }]);
+      setNewAccounts([{ email: '', password: '', isNew: true }]);
     }
     
     // Reset editing state
     setEditingAccountId(null);
-    
-    // Always start with one empty new account field
-    setNewAccounts([{ email: '', password: '', isNew: true }]);
     
     setIsAddingProduct(true);
   };
@@ -472,7 +480,7 @@ const ProductManagement = () => {
                       {newAccounts.length > 1 && (
                         <button
                           type="button"
-                          onClick={() => account.isNew ? removeAccountField(index) : removeAccount(editingProduct!.id, account.id!)}
+                          onClick={() => account.isNew ? removeAccountField(index) : removeAccount(account.id!)}
                           className="ml-2 px-3 py-2 bg-red-100 text-red-600 rounded-md hover:bg-red-200"
                           title="Eliminar cuenta"
                         >
@@ -685,7 +693,7 @@ const ProductManagement = () => {
                                             <Edit className="h-4 w-4" />
                                           </button>
                                           <button
-                                            onClick={() => removeAccount(product.id, account.id)}
+                                            onClick={() => removeAccount(account.id)}
                                             className="text-red-600 hover:text-red-900"
                                             title="Eliminar cuenta"
                                           >
@@ -715,4 +723,5 @@ const ProductManagement = () => {
   );
 };
 
+// Export the component in a separate statement to fix Fast Refresh warning
 export default ProductManagement;

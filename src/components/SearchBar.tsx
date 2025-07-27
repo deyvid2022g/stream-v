@@ -10,7 +10,6 @@ interface SearchBarProps {
 
 const SearchBar: React.FC<SearchBarProps> = ({ onSearch, onClear }) => {
   const [query, setQuery] = useState('');
-  const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     if (query.trim()) {
@@ -20,17 +19,14 @@ const SearchBar: React.FC<SearchBarProps> = ({ onSearch, onClear }) => {
         product.description.toLowerCase().includes(query.toLowerCase())
       );
       onSearch(filtered);
-      setIsOpen(true);
     } else {
       onClear();
-      setIsOpen(false);
     }
   }, [query, onSearch, onClear]);
 
   const handleClear = () => {
     setQuery('');
     onClear();
-    setIsOpen(false);
   };
 
   return (

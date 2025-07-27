@@ -7,7 +7,7 @@ const Login = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
   const [error, setError] = useState('');
 
   const { login, register, isLoading } = useAuth();
@@ -26,8 +26,8 @@ const Login = () => {
     setError('');
 
     if (isLogin) {
-      const result = await login(email, password);
-      if (result.success) {
+      const success = await login(email, password);
+      if (success) {
         navigate(from, { replace: true });
       } else {
         setError('Credenciales incorrectas. Verifica tu email y contraseña.');
@@ -38,7 +38,7 @@ const Login = () => {
         return;
       }
       
-      const success = await register(email, password, name);
+      const success = await register(email, password, username);
       if (success) {
         navigate(from, { replace: true });
       } else {
@@ -93,10 +93,10 @@ const Login = () => {
                 <User className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
                 <input
                   type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-yellow-400"
-                  placeholder="Nombre completo"
+                  placeholder="Nombre de usuario"
                   required
                 />
               </div>

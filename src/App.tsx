@@ -20,14 +20,14 @@ const AppContent: React.FC = () => {
   return (
     <AuthProvider>
       <NotificationProvider>
-        <CartProvider>
-          <OrderProvider>
-            <ProductProvider>
+        <ProductProvider>
+          <CartProvider>
+            <OrderProvider>
               <AppRoutes />
               <NotificationToast />
-            </ProductProvider>
-          </OrderProvider>
-        </CartProvider>
+            </OrderProvider>
+          </CartProvider>
+        </ProductProvider>
       </NotificationProvider>
     </AuthProvider>
   );
@@ -56,15 +56,10 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 };
 
 const AppLayout: React.FC = () => {
-  const { user } = useAuth();
-  const location = useLocation();
-  
-  // Extract the first part of the path to determine the active section
-  const activeSection = location.pathname.split('/')[1] || 'store';
   
   return (
     <div className="min-h-screen bg-gray-100 flex">
-      <Sidebar activeSection={activeSection} />
+      <Sidebar />
       <main className="flex-1 p-6 overflow-y-auto">
         <Outlet />
       </main>

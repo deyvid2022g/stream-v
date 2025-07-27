@@ -10,7 +10,7 @@ import { Product, CartItem } from '../types';
 const ProductDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getProduct } = useProducts();
+  const { getProductById } = useProducts();
   const { addToCart } = useCart();
   const { isAuthenticated } = useAuth();
   const { addNotification } = useNotifications();
@@ -26,7 +26,7 @@ const ProductDetail = () => {
         if (!id) {
           throw new Error('No se encontró el producto');
         }
-        const productData = getProduct(id);
+        const productData = getProductById(id);
         if (!productData) {
           throw new Error('Producto no encontrado');
         }
@@ -40,7 +40,7 @@ const ProductDetail = () => {
     };
 
     loadProduct();
-  }, [id, getProduct, addNotification]);
+  }, [id, getProductById, addNotification]);
 
   const handleAddToCart = () => {
     if (!isAuthenticated) {

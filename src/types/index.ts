@@ -1,10 +1,10 @@
 export interface User {
   id: string;
   email: string;
-  name: string;
-  role: 'user' | 'admin';
+  username: string;
+  is_admin: boolean;
   balance: number;
-  createdAt: Date;
+  createdAt: string;
   password?: string; // Contraseña opcional para usuarios registrados
 }
 
@@ -12,6 +12,7 @@ export interface ProductAccount {
   id: string;
   email: string;
   password: string;
+  productId: string;
   isSold: boolean;
   orderId?: string;
   soldAt?: Date;
@@ -27,7 +28,6 @@ export interface Product {
   discount?: number;
   image: string;
   description: string;
-  duration: string;
   stock?: number;
   rating?: number;
   reviews?: number;
@@ -36,6 +36,16 @@ export interface Product {
 
 export interface CartItem extends Product {
   quantity: number;
+}
+
+export interface OrderItem {
+  id: string;
+  productId: string;
+  name: string;
+  price: number;
+  quantity: number;
+  accounts: ProductAccount[];
+  type: 'product';
 }
 
 export interface Order {

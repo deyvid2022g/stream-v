@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { Package, User, LogOut, Edit, Save, X, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useOrders } from '../context/OrderContext';
-import { Order, OrderItem, OrderItemProductAccount } from '../types/order';
+import { OrderWithItems } from '../services/orderService';
+import { OrderItem } from '../types';
 import { useNotifications } from '../context/NotificationContext';
 
 const Account: React.FC = () => {
@@ -12,9 +13,9 @@ const Account: React.FC = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [isEditing, setIsEditing] = useState(false);
   const [viewingCredentials, setViewingCredentials] = useState<string | null>(null);
-  const [userOrders, setUserOrders] = useState<Order[]>([]);
+  const [userOrders, setUserOrders] = useState<OrderWithItems[]>([]);
   const [editForm, setEditForm] = useState({
-    name: user?.name || '',
+    username: user?.username || '',
     email: user?.email || ''
   });
 
@@ -25,9 +26,7 @@ const Account: React.FC = () => {
     }
   }, [user, orders, getOrdersByUser]);
 
-  const isOrderItem = (item: any): item is OrderItem => {
-    return 'productId' in item && 'type' in item;
-  };
+
 
   const hasAccounts = (item: OrderItem): boolean => {
     return 'accounts' in item && Array.isArray(item.accounts) && item.accounts.length > 0;
@@ -37,7 +36,7 @@ const Account: React.FC = () => {
     if (!user) return;
     
     updateUserProfile(user.id, {
-      name: editForm.name,
+      username: editForm.username,
       email: editForm.email
     });
     
@@ -47,7 +46,7 @@ const Account: React.FC = () => {
 
   const handleCancelEdit = () => {
     setEditForm({
-      name: user?.name || '',
+      username: user?.username || '',
       email: user?.email || ''
     });
     setIsEditing(false);
@@ -128,7 +127,7 @@ const Account: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-4">
-                {userOrders.filter((order: Order) => order && order.items && Array.isArray(order.items)).map((order: Order) => (
+                {userOrders.filter((order: OrderWithItems) => order && order.items && Array.isArray(order.items)).map((order: OrderWithItems) => (
                   <div key={order.id} className="border border-gray-200 rounded-lg p-4">
                     <div className="flex justify-between items-start mb-3">
                       <div>
@@ -230,12 +229,12 @@ const Account: React.FC = () => {
                 {isEditing ? (
                   <input
                     type="text"
-                    value={editForm.name}
-                    onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                    value={editForm.username}
+                    onChange={(e) => setEditForm(prev => ({ ...prev, username: e.target.value }))}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-yellow-400"
                   />
                 ) : (
-                  <p className="text-gray-900 py-2">{user?.name}</p>
+                  <p className="text-gray-900 py-2">{user?.username}</p>
                 )}
               </div>
               <div>
@@ -257,7 +256,7 @@ const Account: React.FC = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de cuenta</label>
-                <p className="text-gray-900 capitalize py-2">{user?.role}</p>
+                <p className="text-gray-900 capitalize py-2">{user?.is_admin ? 'Admin' : 'Usuario'}</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Miembro desde</label>
@@ -358,7 +357,7 @@ const Account: React.FC = () => {
         {/* Welcome Message */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-6">
           <h2 className="text-xl font-semibold text-gray-800 mb-2">
-            Hola <span className="text-yellow-600">{user?.name}</span>
+            Hola <span className="text-yellow-600">{user?.username}</span>
           </h2>
           <p className="text-gray-600">
             Desde el escritorio de tu cuenta puedes ver tus pedidos recientes, gestionar tus direcciones de envío y facturación y editar tu contraseña y los detalles de tu cuenta.

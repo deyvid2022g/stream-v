@@ -1,218 +1,260 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import type { ReactNode } from 'react';
-import type { User } from '../types';
-import { mockUsers } from '../constants/mockUsers';
-import type { AuthContextType } from './AuthContext.types';
+import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import { AuthState, AuthAction } from './AuthContext.types';
+import { User } from '../types';
+import { authService, AuthResponse } from '../services/authService';
+
+interface AuthContextType {
+  user: User | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (email: string, password: string) => Promise<boolean>;
+  register: (email: string, password: string, username: string) => Promise<boolean>;
+  logout: () => void;
+  updateUserBalance: (newBalance: number) => Promise<void>;
+  updateSpecificUserBalance: (userId: string, newBalance: number) => Promise<void>;
+  updateUserProfile: (userId: string, updates: Partial<User>) => Promise<void>;
+  deleteUser: (userId: string) => Promise<void>;
+  createAdminUser: (username: string, email: string, password: string, is_admin?: boolean) => Promise<boolean>;
+  getAllUsers: () => User[];
+  users: User[];
+}
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [users, setUsers] = useState<User[]>(() => {
-    const savedUsers = localStorage.getItem('arkion_users');
-    if (savedUsers) {
-      const parsedUsers = JSON.parse(savedUsers) as User[];
-      // Convertir las cadenas de fecha a objetos Date y asegurar que las contraseñas estén presentes
-      return parsedUsers.map(user => {
-        // Buscar el usuario correspondiente en mockUsers para obtener la contraseña por defecto
-        const mockUser = mockUsers.find(mu => mu.email === user.email);
-        return {
-          ...user,
-          password: user.password || mockUser?.password || 'default_password',
-          createdAt: new Date(user.createdAt)
-        };
-      });
-    }
-    return mockUsers;
-  });
+const authReducer = (state: AuthState, action: AuthAction): AuthState => {
+  switch (action.type) {
+    case 'LOGIN':
+      return {
+        ...state,
+        user: action.payload,
+        isAuthenticated: true,
+      };
+    case 'LOGOUT':
+      return {
+        ...state,
+        user: null,
+        isAuthenticated: false,
+      };
+    case 'UPDATE_BALANCE':
+      return {
+        ...state,
+        user: state.user ? { ...state.user, balance: action.payload } : null,
+      };
+    case 'SET_USERS':
+      return {
+        ...state,
+        users: action.payload,
+      };
+    case 'ADD_USER':
+      return {
+        ...state,
+        users: [...state.users, action.payload],
+      };
+    case 'UPDATE_USER':
+      return {
+        ...state,
+        users: state.users.map((user: User) => 
+          user.id === action.payload.id ? action.payload : user
+        ),
+        user: state.user?.id === action.payload.id ? action.payload : state.user,
+      };
+    case 'DELETE_USER':
+      return {
+        ...state,
+        users: state.users.filter((user: User) => user.id !== action.payload),
+      };
+    case 'SET_LOADING':
+      return {
+        ...state,
+        isLoading: action.payload,
+      };
+    default:
+      return state;
+  }
+};
+
+const initialState: AuthState = {
+  user: null,
+  isAuthenticated: false,
+  users: [],
+  isLoading: true,
+};
+
+export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const [state, dispatch] = useReducer(authReducer, initialState);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('arkion_user');
-    if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
-      // Convertir la fecha a objeto Date
-      if (parsedUser.createdAt && typeof parsedUser.createdAt === 'string') {
-        parsedUser.createdAt = new Date(parsedUser.createdAt);
+    const initializeAuth = async () => {
+      try {
+        // Verificar si hay un usuario guardado en localStorage
+        const savedUser = localStorage.getItem('arkion_current_user');
+        if (savedUser) {
+          const parsedUser = JSON.parse(savedUser) as User;
+          dispatch({ type: 'LOGIN', payload: parsedUser });
+        }
+        
+        // Cargar todos los usuarios
+        const allUsers = await authService.getAllUsers();
+        dispatch({ type: 'SET_USERS', payload: allUsers });
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
       }
-      // Verify user still exists in users array
-      const currentUser = users.find(u => u.id === parsedUser.id);
-      if (currentUser) {
-        setUser(currentUser);
-        setIsAuthenticated(true);
-      } else {
-        localStorage.removeItem('arkion_user');
+    };
+
+    initializeAuth();
+  }, []);
+
+  const login = async (email: string, password: string): Promise<boolean> => {
+    try {
+      const response: AuthResponse = await authService.login({ email, password });
+      
+      if (response.success && response.user) {
+        dispatch({ type: 'LOGIN', payload: response.user });
+        localStorage.setItem('arkion_current_user', JSON.stringify(response.user));
+        return true;
       }
+      
+      return false;
+    } catch (error) {
+      console.error('Login error:', error);
+      return false;
     }
-    setIsLoading(false);
-  }, [users]);
-
-  useEffect(() => {
-    localStorage.setItem('arkion_users', JSON.stringify(users));
-  }, [users]);
-
-  const login = async (email: string, password: string): Promise<{ success: boolean; needsPasswordReset?: boolean }> => {
-    setIsLoading(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Cargar usuarios directamente de localStorage para asegurar que tenemos la versión más reciente
-    const savedUsers = localStorage.getItem('arkion_users');
-    const currentUsers = savedUsers ? (JSON.parse(savedUsers) as User[]) : mockUsers;
-    
-    console.log('Attempting login with:', { email, password });
-    console.log('Available users:', currentUsers.map(u => ({ email: u.email, password: u.password })));
-    
-    const foundUser = currentUsers.find(u => u.email === email);
-    
-    if (!foundUser) {
-      console.log('User not found');
-      setIsLoading(false);
-      return { success: false };
-    }
-    
-    console.log('Found user:', { email: foundUser.email, password: foundUser.password });
-    
-    // Validar contraseña - ahora es obligatoria
-    if (!foundUser.password || foundUser.password !== password) {
-      console.log('Password validation failed');
-      setIsLoading(false);
-      return { success: false };
-    }
-    
-    console.log('Login successful');
-    // Actualizar el estado del usuario y autenticación
-    setUser(foundUser);
-    setIsAuthenticated(true);
-    localStorage.setItem('arkion_user', JSON.stringify(foundUser));
-    
-    setIsLoading(false);
-    return { success: true };
   };
 
-  const register = async (email: string, password: string, name: string): Promise<boolean> => {
-    setIsLoading(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // Cargar usuarios directamente de localStorage
-    const savedUsers = localStorage.getItem('arkion_users');
-    const currentUsers = savedUsers ? (JSON.parse(savedUsers) as User[]) : [];
-    
-    const existingUser = currentUsers.find(u => u.email === email);
-    if (existingUser) {
-      setIsLoading(false);
-      return false; // Usuario ya existe
+  const register = async (email: string, password: string, username: string): Promise<boolean> => {
+    try {
+      const response: AuthResponse = await authService.register({ email, password, username, is_admin: false });
+      
+      if (response.success && response.user) {
+        dispatch({ type: 'LOGIN', payload: response.user });
+        dispatch({ type: 'ADD_USER', payload: response.user });
+        localStorage.setItem('arkion_current_user', JSON.stringify(response.user));
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Register error:', error);
+      return false;
     }
-    
-    const newUser: User = {
-      id: Date.now().toString(),
-      email,
-      name,
-      role: 'user',
-      balance: 0,
-      createdAt: new Date(),
-      password: password
-    };
-    
-    // Actualizamos el estado de usuarios
-    const updatedUsers = [...currentUsers, newUser];
-    setUsers(updatedUsers);
-    
-    // Autenticamos al nuevo usuario automáticamente
-    setUser(newUser);
-    setIsAuthenticated(true);
-    
-    // Guardamos en localStorage
-    localStorage.setItem('arkion_user', JSON.stringify(newUser));
-    localStorage.setItem('arkion_users', JSON.stringify(updatedUsers));
-    
-    setIsLoading(false);
-    return true;
   };
 
   const logout = () => {
-    setUser(null);
-    setIsAuthenticated(false);
-    localStorage.removeItem('arkion_user');
+    dispatch({ type: 'LOGOUT' });
+    localStorage.removeItem('arkion_current_user');
   };
 
-  const updateUserBalance = (userId: string, newBalance: number) => {
-    setUsers(prev => 
-      prev.map(u => 
-        u.id === userId ? { ...u, balance: newBalance } : u
-      )
-    );
+  const updateUserBalance = async (newBalance: number): Promise<void> => {
+    if (!state.user) {
+      throw new Error('No user logged in');
+    }
     
-    if (user && user.id === userId) {
-      const updatedUser = { ...user, balance: newBalance };
-      setUser(updatedUser);
-      localStorage.setItem('arkion_user', JSON.stringify(updatedUser));
+    try {
+      const success = await authService.updateUserBalance(state.user.id, newBalance);
+      if (success) {
+        const userWithNewBalance = { ...state.user, balance: newBalance };
+        dispatch({ type: 'UPDATE_USER', payload: userWithNewBalance });
+        localStorage.setItem('arkion_current_user', JSON.stringify(userWithNewBalance));
+      }
+    } catch (error) {
+      console.error('Error updating balance:', error);
+      throw error;
     }
   };
 
-  const updateUserProfile = (userId: string, updates: Partial<User>) => {
-    setUsers(prev => 
-      prev.map(u => 
-        u.id === userId ? { ...u, ...updates } : u
-      )
-    );
-    
-    if (user && user.id === userId) {
-      const updatedUser = { ...user, ...updates };
-      setUser(updatedUser);
-      localStorage.setItem('arkion_user', JSON.stringify(updatedUser));
+  const updateSpecificUserBalance = async (userId: string, newBalance: number): Promise<void> => {
+    try {
+      const success = await authService.updateUserBalance(userId, newBalance);
+      if (success) {
+        const updatedUser = state.users.find((u: User) => u.id === userId);
+        if (updatedUser) {
+          const userWithNewBalance = { ...updatedUser, balance: newBalance };
+          dispatch({ type: 'UPDATE_USER', payload: userWithNewBalance });
+          
+          // Si es el usuario actual, actualizar también el localStorage
+          if (state.user && state.user.id === userId) {
+            localStorage.setItem('arkion_current_user', JSON.stringify(userWithNewBalance));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error updating balance:', error);
+      throw error;
     }
   };
 
-  const deleteUser = (userId: string) => {
-    setUsers(prev => prev.filter(u => u.id !== userId));
-    
-    if (user && user.id === userId) {
-      logout();
+  const updateUserProfile = async (userId: string, updates: Partial<User>): Promise<void> => {
+    try {
+      const success = await authService.updateUserProfile(userId, updates);
+      if (success) {
+        const updatedUser = state.users.find((u: User) => u.id === userId);
+        if (updatedUser) {
+          const userWithUpdates = { ...updatedUser, ...updates };
+          dispatch({ type: 'UPDATE_USER', payload: userWithUpdates });
+          
+          // Si es el usuario actual, actualizar también el localStorage
+          if (state.user && state.user.id === userId) {
+            localStorage.setItem('arkion_current_user', JSON.stringify(userWithUpdates));
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error updating profile:', error);
     }
   };
 
-  const createAdminUser = (name: string, email: string, password: string, role: string = 'admin'): boolean => {
-    // Verificar si el email ya existe
-    const existingUser = users.find(u => u.email === email);
-    if (existingUser) {
-      return false; // Usuario ya existe
+  const deleteUser = async (userId: string): Promise<void> => {
+    try {
+      const success = await authService.deleteUser(userId);
+      
+      if (success) {
+        dispatch({ type: 'DELETE_USER', payload: userId });
+        
+        if (state.user && state.user.id === userId) {
+          logout();
+        }
+      }
+    } catch (error) {
+      console.error('Error deleting user:', error);
     }
-
-    const newAdmin: User = {
-      id: Date.now().toString(),
-      email,
-      name,
-      role: role as 'admin' | 'user',
-      balance: 0,
-      createdAt: new Date(),
-      password: password
-    };
-
-    setUsers(prev => [...prev, newAdmin]);
-    return true;
   };
 
-  const getAllUsers = () => users;
+  const createAdminUser = async (username: string, email: string, password: string, is_admin: boolean = true): Promise<boolean> => {
+    try {
+      const response: AuthResponse = await authService.createAdminUser({ email, password, username, is_admin });
+      
+      if (response.success && response.user) {
+        dispatch({ type: 'ADD_USER', payload: response.user });
+        return true;
+      }
+      
+      return false;
+    } catch (error) {
+      console.error('Error creating admin user:', error);
+      return false;
+    }
+  };
+
+  const getAllUsers = () => state.users;
 
   return (
     <AuthContext.Provider 
       value={{
-        user,
-        isAuthenticated,
-        isLoading,
+        user: state.user,
+        isAuthenticated: state.isAuthenticated,
+        isLoading: state.isLoading,
         login,
         logout,
         register,
         updateUserBalance,
+        updateSpecificUserBalance,
         getAllUsers,
         updateUserProfile,
         deleteUser,
-        createAdminUser
+        createAdminUser,
+        users: state.users
       }}
     >
       {children}
@@ -220,7 +262,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
-export const useAuth = (): AuthContextType => {
+const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
@@ -228,4 +270,5 @@ export const useAuth = (): AuthContextType => {
   return context;
 };
 
+export { useAuth };
 export default AuthContext;

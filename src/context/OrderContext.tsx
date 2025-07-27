@@ -1,99 +1,106 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { CartItem } from '../types';
-import { Order, OrderItem } from '../types/order';
 import { useAuth } from './AuthContext';
+import { orderService, OrderWithItems } from '../services/orderService';
 
 interface OrderContextType {
-  orders: Order[];
-  createOrder: (items: CartItem[], total: number, onOrderCreated?: (order: Order) => Promise<void>) => Promise<Order>;
-  getOrdersByUser: (userId: string) => Order[];
-  updateOrderStatus: (orderId: string, status: Order['status']) => void;
-  getAllOrders: () => Order[];
+  orders: OrderWithItems[];
+  createOrder: (items: CartItem[]) => Promise<OrderWithItems | null>;
+  getUserOrders: (userId: string) => Promise<OrderWithItems[]>;
+  updateOrderStatus: (orderId: string, status: OrderWithItems['status']) => Promise<void>;
+  deleteOrder: (orderId: string) => Promise<void>;
+  getAllOrders: () => OrderWithItems[];
+  getOrdersByUser: (userId: string) => OrderWithItems[];
 }
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined);
 
 export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [orders, setOrders] = useState<Order[]>(() => {
-    const savedOrders = localStorage.getItem('arkion_orders');
-    return savedOrders ? JSON.parse(savedOrders) : [];
-  });
+  const [orders, setOrders] = useState<OrderWithItems[]>([]);
+  const { user, updateUserBalance } = useAuth();
 
-  const { user } = useAuth();
-
-  const createOrder = async (items: CartItem[], total: number, onOrderCreated?: (order: Order) => Promise<void>): Promise<Order> => {
-    if (!user) throw new Error('User must be authenticated to create order');
-
-    // Convert CartItems to OrderItems (initially without accounts)
-    const orderItems: OrderItem[] = items.map(item => ({
-      id: item.id,
-      productId: item.id,
-      name: item.name,
-      price: item.price,
-      quantity: item.quantity,
-      accounts: [], // Will be populated by the callback
-      type: 'digital' as const
-    }));
-
-    const newOrder: Order = {
-      id: Date.now().toString(),
-      userId: user.id,
-      userEmail: user.email,
-      items: orderItems,
-      total,
-      status: 'processing',
-      paymentMethod: 'balance',
-      createdAt: new Date()
+  useEffect(() => {
+    const loadOrders = async () => {
+      try {
+        const ordersData = await orderService.getAllOrders();
+        setOrders(ordersData);
+      } catch (error) {
+        console.error('Error loading orders:', error);
+      }
     };
 
-    setOrders(prev => {
-      const updated = [...prev, newOrder];
-      localStorage.setItem('arkion_orders', JSON.stringify(updated));
-      return updated;
-    });
+    loadOrders();
+  }, []);
 
-    // Llamar al callback después de crear la orden
+  const createOrder = async (items: CartItem[]): Promise<OrderWithItems | null> => {
+    if (!user) return null;
+
     try {
-      if (onOrderCreated) {
-        await onOrderCreated(newOrder);
+      const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      
+      if (user.balance < total) {
+        throw new Error('Saldo insuficiente');
       }
 
-      // Simulate order processing
-      setTimeout(() => {
-        updateOrderStatus(newOrder.id, 'completed');
-      }, 3000);
-
-      return newOrder;
+      const order = await orderService.createOrder(user.id, user.email, items, total);
+      
+      if (order) {
+        // Actualizar balance del usuario
+        const newBalance = user.balance - total;
+        await updateUserBalance(newBalance);
+        
+        // Recargar órdenes
+        const ordersData = await orderService.getAllOrders();
+        setOrders(ordersData);
+        
+        return order;
+      }
+      
+      return null;
     } catch (error) {
-      console.error('Error en el proceso de creación de orden:', error);
-      // Marcar la orden como cancelada en caso de error
-      updateOrderStatus(newOrder.id, 'cancelled');
+      console.error('Error creating order:', error);
       throw error;
     }
   };
 
-  const getOrdersByUser = (userId: string): Order[] => {
-    return orders.filter(order => order.userId === userId);
+  const getUserOrders = async (userId: string): Promise<OrderWithItems[]> => {
+    try {
+      const ordersData = await orderService.getUserOrders(userId);
+      return ordersData;
+    } catch (error) {
+      console.error('Error getting user orders:', error);
+      return [];
+    }
   };
 
-  const updateOrderStatus = (orderId: string, status: Order['status']) => {
-    setOrders(prev => {
-      const updated = prev.map(order =>
-        order.id === orderId 
-          ? { 
-              ...order, 
-              status,
-              deliveredAt: status === 'completed' ? new Date() : order.deliveredAt
-            }
-          : order
-      );
-      localStorage.setItem('arkion_orders', JSON.stringify(updated));
-      return updated;
-    });
+  const updateOrderStatus = async (orderId: string, status: OrderWithItems['status']) => {
+    try {
+      await orderService.updateOrderStatus(orderId, status);
+      setOrders(prev => prev.map(order => 
+        order.id === orderId ? { ...order, status } : order
+      ));
+    } catch (error) {
+      console.error('Error updating order status:', error);
+      throw error;
+    }
   };
 
-  const getAllOrders = (): Order[] => {
+  const deleteOrder = async (orderId: string) => {
+    try {
+      await orderService.deleteOrder(orderId);
+      setOrders(prev => prev.filter(order => order.id !== orderId));
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      throw error;
+    }
+  };
+
+  const getAllOrders = (): OrderWithItems[] => {
     return orders;
+  };
+
+  const getOrdersByUser = (userId: string): OrderWithItems[] => {
+    return orders.filter(order => order.userId === userId);
   };
 
   return (
@@ -101,9 +108,11 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       value={{
         orders,
         createOrder,
-        getOrdersByUser,
+        getUserOrders,
         updateOrderStatus,
-        getAllOrders
+        deleteOrder,
+        getAllOrders,
+        getOrdersByUser
       }}
     >
       {children}
@@ -111,10 +120,13 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   );
 };
 
-export const useOrders = () => {
+const useOrders = () => {
   const context = useContext(OrderContext);
   if (context === undefined) {
     throw new Error('useOrders must be used within an OrderProvider');
   }
   return context;
 };
+
+export { useOrders };
+export default OrderContext;

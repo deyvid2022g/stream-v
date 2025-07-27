@@ -180,12 +180,7 @@ const Cart: React.FC = () => {
               // Marcar cada cuenta como vendida
               for (const account of accountsToSell) {
                 try {
-                  await markAccountAsSold(
-                    product.id,
-                    account.id,
-                    order.id,
-                    user!.id
-                  );
+                  await markAccountAsSold(account.id, order.id);
                   markedAccounts.push({
                     productId: product.id,
                     accountId: account.id,
@@ -223,7 +218,7 @@ const Cart: React.FC = () => {
                 acc[key].errors.push(curr.error);
               }
               return acc;
-            }, {} as Record<string, {productName: string, count: number, errors: any[]}>);
+            }, {} as Record<string, {productName: string, count: number, errors: string[]}>);
             
             // Mostrar notificaciones específicas para cada producto con error
             Object.values(groupedErrors).forEach(group => {
@@ -240,12 +235,35 @@ const Cart: React.FC = () => {
         }
       };
 
-      // Crear la orden y pasar la función para marcar cuentas como vendidas
-      const order = await createOrder(itemsToPurchase, total, markAccountsAsSold);
+      // Crear la orden
+      const order = await createOrder(itemsToPurchase);
+      
+      if (!order) {
+        throw new Error('No se pudo crear la orden');
+      }
+      
+      // Convertir Order de index.ts a Order de order.ts
+      const orderWithUserInfo: Order = {
+        ...order,
+        userEmail: user.email || '',
+        paymentMethod: 'points',
+        items: order.items.map(item => ({
+          id: item.id,
+          productId: item.id, // Usar el id del item como productId
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity,
+          accounts: [], // Se llenará en markAccountsAsSold
+          type: 'digital' as const
+        }))
+      };
+      
+      // Marcar las cuentas como vendidas después de crear la orden
+      await markAccountsAsSold(orderWithUserInfo);
       
       // Actualizar el saldo del usuario
       const newBalance = user.balance - total;
-      await updateUserBalance(user.id, newBalance);
+      await updateUserBalance(newBalance);
       
       // Eliminar solo los artículos comprados del carrito
       itemsToProcess.forEach(itemId => removeFromCart(itemId));

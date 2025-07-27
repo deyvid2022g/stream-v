@@ -4,11 +4,7 @@ import { Store, User, ShoppingCart, HelpCircle, DollarSign, LogOut, Shield, Sear
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 
-interface SidebarProps {
-  activeSection: string;
-}
-
-const Sidebar: React.FC<SidebarProps> = ({ activeSection }) => {
+const Sidebar: React.FC = () => {
   const { user, logout } = useAuth();
   const { getItemCount } = useCart();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -29,7 +25,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection }) => {
     { id: 'support', label: 'SOPORTE', icon: HelpCircle, path: '/support' },
   ];
 
-  if (user?.role === 'admin') {
+  if (user?.is_admin) {
     menuItems.push({ id: 'admin', label: 'ADMIN', icon: Shield, path: '/admin' });
   }
 
@@ -126,7 +122,7 @@ const Sidebar: React.FC<SidebarProps> = ({ activeSection }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-400 text-sm">Bienvenido</p>
-              <p className="text-white font-medium">{user?.name}</p>
+              <p className="text-white font-medium">{user?.username}</p>
             </div>
             
             <button

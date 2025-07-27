@@ -8,19 +8,13 @@ const Store = () => {
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Filter products based on search query and available stock
+  // Filter products based on search query (show all products regardless of stock)
   const filteredProducts = useMemo(() => {
-    // First filter by stock
-    const inStockProducts = products.filter(product => {
-      const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
-      return availableStock > 0;
-    });
-
-    // Then apply search filter
-    if (!searchQuery.trim()) return inStockProducts;
+    // Apply search filter to all products
+    if (!searchQuery.trim()) return products;
     
     const query = searchQuery.toLowerCase();
-    return inStockProducts.filter((product) => {
+    return products.filter((product) => {
       const nameMatch = product.name?.toLowerCase().includes(query) || false;
       const descMatch = product.description?.toLowerCase().includes(query) || false;
       const categoryMatch = product.category?.toLowerCase().includes(query) || false;

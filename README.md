@@ -1,29 +1,33 @@
-# Sistema de Venta de Cuentas Digitales
+# Stream Venta - Plataforma de Cuentas Digitales
 
-Un sistema completo de e-commerce para la venta de cuentas digitales con gestión de inventario, usuarios y órdenes.
+Una plataforma moderna de e-commerce para la venta de cuentas digitales (Netflix, Spotify, Disney+, etc.) con integración completa de Supabase y gestión avanzada de inventario.
 
-## 🚀 Características
+## 🚀 Características Principales
 
-- **Gestión de Productos**: Administración completa de productos y cuentas digitales
-- **Sistema de Usuarios**: Registro, login y gestión de perfiles
-- **Carrito de Compras**: Funcionalidad completa de e-commerce
-- **Panel de Administración**: Dashboard completo para administradores
-- **Sincronización de Datos**: Exportar/importar datos entre dispositivos
-- **Gestión de Stock**: Control automático de inventario
-- **Sistema de Órdenes**: Procesamiento y seguimiento de pedidos
+- **🎯 Gestión de Productos**: Administración completa de productos y cuentas digitales
+- **👥 Sistema de Usuarios**: Registro, login y gestión de perfiles con Supabase Auth
+- **🛒 Carrito de Compras**: Funcionalidad completa de e-commerce
+- **⚡ Base de Datos en Tiempo Real**: Integración con Supabase PostgreSQL
+- **🔐 Autenticación Segura**: Sistema de autenticación con bcrypt
+- **📊 Panel de Administración**: Dashboard completo para administradores
+- **💰 Gestión de Saldo**: Sistema de créditos y transacciones
+- **📦 Gestión de Stock**: Control automático de inventario en tiempo real
+- **📋 Sistema de Órdenes**: Procesamiento y seguimiento de pedidos
+- **🔄 Sincronización**: Datos sincronizados en tiempo real entre dispositivos
 
 ## 📋 Requisitos Previos
 
 - Node.js (versión 16 o superior)
 - npm o yarn
+- Cuenta de Supabase (gratuita)
 - Navegador web moderno
 
 ## 🛠️ Instalación
 
 1. **Clonar el repositorio**
    ```bash
-   git clone [URL_DEL_REPOSITORIO]
-   cd project
+   git clone https://github.com/deyvid2022g/stream-v.git
+   cd stream-v
    ```
 
 2. **Instalar dependencias**
@@ -31,7 +35,13 @@ Un sistema completo de e-commerce para la venta de cuentas digitales con gestió
    npm install
    ```
 
-3. **Ejecutar en modo desarrollo**
+3. **Configurar variables de entorno**
+   ```bash
+   cp .env.example .env
+   # Editar .env con tus credenciales de Supabase
+   ```
+
+4. **Ejecutar en modo desarrollo**
    ```bash
    npm run dev
    ```
@@ -94,18 +104,36 @@ Un sistema completo de e-commerce para la venta de cuentas digitales con gestió
    vercel
    ```
 
-## 📊 Base de Datos
+## 🗄️ Base de Datos Supabase
 
-La aplicación utiliza localStorage para almacenamiento local. Para producción se incluye:
+La aplicación utiliza Supabase como backend con PostgreSQL:
 
-- **Exportación completa**: Descarga Excel con 5 hojas:
-  - Usuarios
-  - Órdenes
-  - Productos
-  - Cuentas Disponibles
-  - Cuentas Vendidas
+### Configuración de la Base de Datos
 
-- **Sincronización**: Sistema de exportar/importar datos JSON
+1. **Crear proyecto en Supabase**
+   - Ir a [supabase.com](https://supabase.com)
+   - Crear nuevo proyecto
+   - Obtener URL y API Key
+
+2. **Aplicar esquema**
+   ```sql
+   -- Ejecutar el contenido de supabase-schema.sql en el SQL Editor
+   ```
+
+### Estructura de Tablas
+
+- **users**: Gestión de usuarios y autenticación
+- **products**: Catálogo de productos digitales
+- **product_accounts**: Inventario de cuentas disponibles
+- **orders**: Registro de órdenes de compra
+- **order_items**: Detalles de productos en órdenes
+
+### Características de la BD
+
+- **Tiempo Real**: Actualizaciones automáticas
+- **Seguridad**: Row Level Security (RLS)
+- **Escalabilidad**: PostgreSQL en la nube
+- **Backup**: Respaldos automáticos
 
 ## 👤 Usuarios por Defecto
 
@@ -120,13 +148,18 @@ La aplicación utiliza localStorage para almacenamiento local. Para producción 
 
 ## 🔧 Configuración
 
-### Variables de Entorno (Opcional)
+### Variables de Entorno (Requeridas)
 
 Crear archivo `.env` en la raíz:
 ```env
-VITE_APP_NAME="Sistema de Ventas"
-VITE_API_URL="https://tu-api.com"
+VITE_SUPABASE_URL=tu_supabase_url
+VITE_SUPABASE_ANON_KEY=tu_supabase_anon_key
 ```
+
+**Obtener credenciales:**
+1. Ir a tu proyecto en Supabase
+2. Settings → API
+3. Copiar URL y anon/public key
 
 ### Personalización
 

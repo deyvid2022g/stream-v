@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS products (
   description TEXT,
   price DECIMAL(10,2) NOT NULL,
   discount DECIMAL(5,2) DEFAULT 0.00,
-  image VARCHAR(500),
+  image TEXT,
   category VARCHAR(100),
   duration VARCHAR(100) DEFAULT '1 mes',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

@@ -2,13 +2,15 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useOrders } from '../context/OrderContext';
 import { useNotifications } from '../context/NotificationContext';
-import { useProducts } from '../context/ProductContext';
+import useProducts from '../context/ProductContext';
 import { Users, DollarSign, CreditCard, TrendingUp, Search, Package, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { OrderStatus } from '../types/order';
 import type { User, Product, ProductAccount } from '../types';
-import type { OrderWithItems } from '../services/orderService';
+import type { OrderWithItems, OrderItem } from '../types/order';
 import ProductManagement from './admin/ProductManagement';
+import DataSync from './DataSync';
+import { authService } from '../services/authService';
 
 
 
@@ -22,7 +24,8 @@ const Admin: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isCreateAccountModalOpen, setIsCreateAccountModalOpen] = useState(false);
   const [isEditPasswordModalOpen, setIsEditPasswordModalOpen] = useState(false);
-
+  const [isTotalBalanceModalOpen, setIsTotalBalanceModalOpen] = useState(false);
+  
   const [newAccount, setNewAccount] = useState({ username: '', email: '', password: '', is_admin: true });
   const [newPassword, setNewPassword] = useState('');
   const [selectedUser, setSelectedUser] = useState('');
@@ -33,6 +36,9 @@ const Admin: React.FC = () => {
   const orders = getAllOrders();
   const regularUsers = users.filter((user: User) => !user.is_admin);
   const adminUsers = users.filter((user: User) => user.is_admin);
+  
+  // Calcular el saldo total
+  const totalBalance = regularUsers.reduce((sum, user) => sum + user.balance, 0);
 
 
 
@@ -90,16 +96,23 @@ const Admin: React.FC = () => {
     }
   };
 
-  const handleEditPassword = (e: React.FormEvent) => {
+  const handleEditPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedUser && newPassword) {
-      // Here you would typically make an API call to update the password
-      console.log(`Updating password for user ${selectedUser}`);
-      
-      setIsEditPasswordModalOpen(false);
-      setSelectedUser('');
-      setNewPassword('');
-      alert('Contraseña actualizada exitosamente');
+      try {
+        const success = await authService.updateUserPassword(selectedUser, newPassword);
+        
+        if (success) {
+          setIsEditPasswordModalOpen(false);
+          setSelectedUser('');
+          setNewPassword('');
+          addNotification('success', 'Contraseña actualizada exitosamente');
+        } else {
+          addNotification('error', 'Error al actualizar la contraseña');
+        }
+      } catch {
+        addNotification('error', 'Error al actualizar la contraseña');
+      }
     }
   };
 
@@ -316,6 +329,7 @@ const Admin: React.FC = () => {
                   value={newAccount.password}
                   onChange={(e) => setNewAccount({...newAccount, password: e.target.value})}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                  autoComplete="new-password"
                   required
                 />
               </div>
@@ -396,6 +410,7 @@ const Admin: React.FC = () => {
                    value={newPassword}
                    onChange={(e) => setNewPassword(e.target.value)}
                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                   autoComplete="new-password"
                    required
                    minLength={6}
                  />
@@ -421,6 +436,192 @@ const Admin: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Recargar Saldo */}
+      {isRechargeModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold">Recargar Saldo</h3>
+              <button 
+                onClick={() => {
+                  setIsRechargeModalOpen(false);
+                  setSelectedUser('');
+                  setAmount('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <form onSubmit={handleRechargeBalance}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Usuario
+                </label>
+                <select
+                  value={selectedUser}
+                  onChange={(e) => setSelectedUser(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                  required
+                >
+                  <option value="">Seleccionar usuario</option>
+                  {regularUsers.map((user: User) => (
+                    <option key={user.id} value={user.id}>
+                      {user.username} - ${user.balance.toFixed(2)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="mb-6">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Monto a Recargar
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-yellow-400"
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRechargeModalOpen(false);
+                    setSelectedUser('');
+                    setAmount('');
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 text-sm font-medium text-white bg-green-500 border border-transparent rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                >
+                  Recargar Saldo
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para Detalles del Saldo Total */}
+      {isTotalBalanceModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-semibold text-gray-800">Detalles del Saldo Total</h3>
+              <button 
+                onClick={() => setIsTotalBalanceModalOpen(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div className="bg-gradient-to-r from-green-50 to-green-100 p-4 rounded-lg">
+                <h4 className="text-lg font-semibold text-green-800 mb-2">Resumen General</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-green-700">Total de Usuarios:</span>
+                    <span className="font-semibold text-green-800">{regularUsers.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-green-700">Saldo Total:</span>
+                    <span className="font-bold text-green-800 text-lg">${totalBalance.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-green-700">Promedio por Usuario:</span>
+                    <span className="font-semibold text-green-800">${regularUsers.length > 0 ? (totalBalance / regularUsers.length).toFixed(2) : '0.00'}</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 rounded-lg">
+                <h4 className="text-lg font-semibold text-blue-800 mb-2">Distribución de Saldos</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                     <span className="text-blue-700">Usuarios con saldo &gt; $100:</span>
+                     <span className="font-semibold text-blue-800">{regularUsers.filter(u => u.balance > 100).length}</span>
+                   </div>
+                   <div className="flex justify-between">
+                     <span className="text-blue-700">Usuarios con saldo &gt; $50:</span>
+                     <span className="font-semibold text-blue-800">{regularUsers.filter(u => u.balance > 50).length}</span>
+                   </div>
+                  <div className="flex justify-between">
+                    <span className="text-blue-700">Usuarios sin saldo:</span>
+                    <span className="font-semibold text-blue-800">{regularUsers.filter(u => u.balance === 0).length}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <div className="bg-gray-50 px-4 py-3 border-b border-gray-200">
+                <h4 className="text-lg font-medium text-gray-900">Detalle por Usuario</h4>
+              </div>
+              <div className="max-h-96 overflow-y-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Saldo</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">% del Total</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha Registro</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {regularUsers
+                      .sort((a, b) => b.balance - a.balance)
+                      .map((user: User) => (
+                      <tr key={user.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{user.username}</div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="text-sm text-gray-600">{user.email}</div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="text-sm font-semibold text-gray-900">${user.balance.toFixed(2)}</div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="text-sm text-gray-600">
+                            {totalBalance > 0 ? ((user.balance / totalBalance) * 100).toFixed(1) : '0.0'}%
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="text-sm text-gray-600">{new Date(user.createdAt).toLocaleDateString()}</div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <div className="flex justify-end mt-6">
+              <button
+                onClick={() => setIsTotalBalanceModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-white bg-gray-600 border border-transparent rounded-md hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+              >
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -464,7 +665,7 @@ const Admin: React.FC = () => {
                    order.status === 'processing' ? 'Procesando' :
                    order.status === 'cancelled' ? 'Cancelado' : 'Pendiente',
           'Fecha': new Date(order.createdAt).toLocaleDateString(),
-          'Productos': order.items.map(item => `${item.name} (x${item.quantity})`).join(', ')
+          'Productos': order.items.map((item: OrderItem) => `${item.name} (x${item.quantity})`).join(', ')
         };
       });
 
@@ -478,7 +679,6 @@ const Admin: React.FC = () => {
         'Stock Disponible': product.accounts?.filter((acc: ProductAccount) => !acc.isSold).length || 0,
         'Stock Vendido': product.accounts?.filter((acc: ProductAccount) => acc.isSold).length || 0,
         'Descripción': product.description,
-        'Duración': product.duration,
         'Fecha Creación': 'N/A'
       }));
 
@@ -570,7 +770,6 @@ const Admin: React.FC = () => {
   const renderProducts = () => <ProductManagement />;
 
   const totalUsers = regularUsers.length;
-  const totalBalance = regularUsers.reduce((sum, user) => sum + user.balance, 0);
   const totalOrders = orders.length;
   const totalRevenue = orders.filter(o => o.status === 'completed').reduce((sum, order) => sum + order.total, 0);
 
@@ -588,11 +787,15 @@ const Admin: React.FC = () => {
           </div>
         </div>
         
-        <div className="bg-white rounded-lg shadow-sm sm:shadow-md p-3 sm:p-4 md:p-6">
+        <div 
+          className="bg-white rounded-lg shadow-sm sm:shadow-md p-3 sm:p-4 md:p-6 cursor-pointer hover:shadow-lg transition-shadow duration-200"
+          onClick={() => setIsTotalBalanceModalOpen(true)}
+        >
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs sm:text-sm text-gray-600">Saldo Total</p>
               <p className="text-lg sm:text-xl md:text-2xl font-bold text-gray-800">${totalBalance.toLocaleString()}</p>
+              <p className="text-xs text-blue-600 mt-1">Click para ver detalles</p>
             </div>
             <DollarSign className="w-6 h-6 sm:w-7 sm:h-7 md:w-8 md:h-8 text-green-500" />
           </div>
@@ -1033,6 +1236,7 @@ const Admin: React.FC = () => {
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-yellow-500 focus:border-yellow-500"
+                  autoComplete="new-password"
                   required
                 />
               </div>
@@ -1137,6 +1341,9 @@ const Admin: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Componente DataSync */}
+      <DataSync />
     </div>
   );
 };

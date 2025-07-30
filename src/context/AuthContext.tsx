@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, ReactNode } from 'react';
 import { AuthState, AuthAction } from './AuthContext.types';
 import { User } from '../types';
 import { authService, AuthResponse } from '../services/authService';
@@ -15,6 +15,7 @@ interface AuthContextType {
   updateUserProfile: (userId: string, updates: Partial<User>) => Promise<void>;
   deleteUser: (userId: string) => Promise<void>;
   createAdminUser: (username: string, email: string, password: string, is_admin?: boolean) => Promise<boolean>;
+  refreshUser: () => Promise<void>;
   getAllUsers: () => User[];
   users: User[];
 }
@@ -237,6 +238,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const refreshUser = async (): Promise<void> => {
+    if (!state.user) {
+      throw new Error('No user logged in');
+    }
+    
+    try {
+      const updatedUser = await authService.getUserById(state.user.id);
+      if (updatedUser) {
+        dispatch({ type: 'UPDATE_USER', payload: updatedUser });
+        localStorage.setItem('arkion_current_user', JSON.stringify(updatedUser));
+      }
+    } catch (error) {
+      console.error('Error refreshing user:', error);
+      throw error;
+    }
+  };
+
   const getAllUsers = () => state.users;
 
   return (
@@ -254,6 +272,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         updateUserProfile,
         deleteUser,
         createAdminUser,
+        refreshUser,
         users: state.users
       }}
     >

@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, Eye, EyeOff, ChevronDown, ChevronUp, X } from 'lucide-react';
-import { useProducts } from '../../context/ProductContext';
+import useProducts from '../../context/ProductContext';
 import { CreateProductDTO } from '../../types/product';
 import { Product, ProductAccount } from '../../types';
 import { useNotifications } from '../../context/NotificationContext';
+import ImageService from '../../services/ImageService';
 
 const ProductManagement = () => {
   const { products, loading, error, addProduct, updateProduct, deleteProduct, addProductAccount, deleteProductAccount, getAllAccounts } = useProducts();
@@ -24,7 +25,7 @@ const ProductManagement = () => {
     duration: '30 días',
   });
   
-  const [, setImageFile] = useState<File | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
   
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
@@ -50,14 +51,19 @@ const ProductManagement = () => {
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      // Validar la imagen antes de procesarla
+      const validation = ImageService.validateImage(file);
+      if (!validation.valid) {
+        addNotification('error', validation.error || 'Imagen no válida');
+        return;
+      }
+      
       setImageFile(file);
+      
+      // Solo mostrar la vista previa, no guardar en formData todavía
       const reader = new FileReader();
       reader.onloadend = () => {
         setImagePreview(reader.result as string);
-        setFormData(prev => ({
-          ...prev,
-          image: reader.result as string
-        }));
       };
       reader.readAsDataURL(file);
     }
@@ -128,14 +134,37 @@ const ProductManagement = () => {
     e.preventDefault();
     
     try {
+      // Preparar datos del producto (sin imagen por ahora)
+      const productDataToSave = { ...formData };
+      
       // Filter out empty accounts and only process new accounts
       const validNewAccounts = newAccounts
         .filter(acc => acc.isNew && acc.email && acc.password)
         .map(({ email, password }) => ({ email, password }));
       
+      // Manejar la imagen si hay una nueva
+      let imageUrl = formData.image;
+      
       if (editingProduct) {
-        // Update existing product
-        await updateProduct(editingProduct.id, formData);
+        // Si estamos editando y hay un nuevo archivo de imagen
+        if (imageFile) {
+          // Subir la nueva imagen
+          const uploadResult = await ImageService.uploadProductImage(imageFile, editingProduct.id);
+          if (uploadResult.success && uploadResult.url) {
+            // Si la imagen anterior era de Supabase Storage, eliminarla
+            if (editingProduct.image && editingProduct.image.includes('supabase')) {
+              await ImageService.deleteProductImage(editingProduct.image);
+            }
+            imageUrl = uploadResult.url;
+          } else {
+            addNotification('error', uploadResult.error || 'Error al subir la imagen');
+            return;
+          }
+        }
+        
+        // Actualizar el producto con la URL de la imagen
+        productDataToSave.image = imageUrl;
+        await updateProduct(editingProduct.id, productDataToSave);
         
         // Add only new accounts if any
         if (validNewAccounts.length > 0) {
@@ -145,20 +174,34 @@ const ProductManagement = () => {
         }
         addNotification('success', 'Producto actualizado correctamente');
       } else {
-        // Add new product
-        const newProduct = await addProduct(formData);
+        // Add new product (sin imagen primero para obtener el ID)
+        productDataToSave.image = ''; // Temporalmente sin imagen
+        const newProduct = await addProduct(productDataToSave);
         
-        // Add all valid accounts to the new product
-        const allValidAccounts = newAccounts
-          .filter(acc => acc.email && acc.password)
-          .map(({ email, password }) => ({ email, password }));
-        
-        if (newProduct && allValidAccounts.length > 0) {
-          for (const account of allValidAccounts) {
-            await addProductAccount(newProduct.id, account);
+        if (newProduct) {
+          // Si hay una imagen, subirla ahora que tenemos el ID del producto
+          if (imageFile) {
+            const uploadResult = await ImageService.uploadProductImage(imageFile, newProduct.id);
+            if (uploadResult.success && uploadResult.url) {
+              // Actualizar el producto con la URL de la imagen
+              await updateProduct(newProduct.id, { image: uploadResult.url });
+            } else {
+              addNotification('warning', 'Producto creado pero ' + (uploadResult.error || 'hubo un error al subir la imagen'));
+            }
           }
+          
+          // Add all valid accounts to the new product
+          const allValidAccounts = newAccounts
+            .filter(acc => acc.email && acc.password)
+            .map(({ email, password }) => ({ email, password }));
+          
+          if (allValidAccounts.length > 0) {
+            for (const account of allValidAccounts) {
+              await addProductAccount(newProduct.id, account);
+            }
+          }
+          addNotification('success', 'Producto agregado correctamente');
         }
-        addNotification('success', 'Producto agregado correctamente');
       }
       
       // Reset form

@@ -4,6 +4,7 @@ import { useNotifications } from '../context/NotificationContext';
 
 const DataSync: React.FC = () => {
   const [isImporting, setIsImporting] = useState(false);
+  const [showCredentials, setShowCredentials] = useState(false);
   const { addNotification } = useNotifications();
 
   const handleExport = () => {
@@ -122,6 +123,65 @@ const DataSync: React.FC = () => {
                 </>
               )}
             </label>
+          </div>
+        </div>
+
+        {/* Gestión de Credenciales */}
+        <div className="border border-gray-200 rounded-lg p-4">
+          <h3 className="font-semibold text-gray-800 mb-3">🔐 Gestión de Credenciales</h3>
+          <p className="text-gray-600 text-sm mb-4">
+            Administra las credenciales de acceso y configuraciones de seguridad.
+          </p>
+          
+          <div className="space-y-3">
+            <button
+              onClick={() => setShowCredentials(!showCredentials)}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors duration-200 flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m0 0a2 2 0 012 2m-2-2a2 2 0 00-2 2m2-2V5a2 2 0 00-2-2m0 0V3a2 2 0 00-2-2H9a2 2 0 00-2 2v0a2 2 0 00-2 2v2a2 2 0 002 2h6a2 2 0 002-2V7z" />
+              </svg>
+              {showCredentials ? 'Ocultar Credenciales' : 'Ver Credenciales'}
+            </button>
+            
+            {showCredentials && (
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mt-3">
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Usuario Administrador
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="admin"
+                      defaultValue="admin"
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Contraseña
+                    </label>
+                    <input
+                      type="password"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      placeholder="••••••••"
+                      autoComplete="current-password"
+                    />
+                  </div>
+                  
+                  <div className="flex gap-2 pt-2">
+                    <button className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm transition-colors duration-200">
+                      Actualizar
+                    </button>
+                    <button className="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm transition-colors duration-200">
+                      Generar Nueva
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

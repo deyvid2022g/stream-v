@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useProducts } from '../context/ProductContext';
+import useProducts from '../context/ProductContext';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useNotifications } from '../context/NotificationContext';
-import { ShoppingCart, CreditCard, ChevronLeft, Loader2 } from 'lucide-react';
+import { ShoppingCart, CreditCard, ChevronLeft, Loader2, AlertCircle, CheckCircle, Minus, Plus } from 'lucide-react';
 import { Product, CartItem } from '../types';
 
 const ProductDetail = () => {
@@ -18,6 +18,8 @@ const ProductDetail = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
+  const [isAddingToCart, setIsAddingToCart] = useState(false);
+  const [isBuyingNow, setIsBuyingNow] = useState(false);
 
   useEffect(() => {
     const loadProduct = async () => {
@@ -42,7 +44,7 @@ const ProductDetail = () => {
     loadProduct();
   }, [id, getProductById, addNotification]);
 
-  const handleAddToCart = () => {
+  const handleAddToCart = useCallback(async () => {
     if (!isAuthenticated) {
       addNotification('info', 'Por favor inicia sesión para continuar');
       navigate('/login', { state: { from: `/product/${id}` } });
@@ -51,26 +53,33 @@ const ProductDetail = () => {
     
     if (!product) return;
     
-    // Create a CartItem with the required properties
-    const cartItem: CartItem = {
-      ...product,
-      quantity,
-      // Ensure all required Product properties are included
-      id: product.id,
-      name: product.name,
-      price: product.price,
-      category: product.category,
-      image: product.image,
-      description: product.description,
-      duration: product.duration,
-      accounts: product.accounts || []
-    };
-    
-    addToCart(cartItem);
-    addNotification('success', 'Producto añadido al carrito');
-  };
+    setIsAddingToCart(true);
+    try {
+      // Create a CartItem with the required properties
+      const cartItem: CartItem = {
+        ...product,
+        quantity,
+        // Ensure all required Product properties are included
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        category: product.category,
+        image: product.image,
+        description: product.description,
+        duration: product.duration,
+        accounts: product.accounts || []
+      };
+      
+      addToCart(cartItem);
+      addNotification('success', `${product.name} agregado al carrito (${quantity} unidades)`);
+    } catch (error) {
+      addNotification('error', 'Error al agregar el producto al carrito');
+    } finally {
+      setIsAddingToCart(false);
+    }
+  }, [isAuthenticated, product, quantity, addToCart, addNotification, navigate, id]);
 
-  const handleBuyNow = () => {
+  const handleBuyNow = useCallback(async () => {
     if (!isAuthenticated) {
       addNotification('info', 'Por favor inicia sesión para continuar');
       navigate('/login', { state: { from: `/product/${id}` } });
@@ -79,24 +88,42 @@ const ProductDetail = () => {
     
     if (!product) return;
     
-    // Create a CartItem with the required properties
-    const cartItem: CartItem = {
-      ...product,
-      quantity,
-      // Ensure all required Product properties are included
-      id: product.id,
-      name: product.name,
-      price: product.price,
-      category: product.category,
-      image: product.image,
-      description: product.description,
-      duration: product.duration,
-      accounts: product.accounts || []
-    };
+    const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
     
-    addToCart(cartItem);
-    navigate('/checkout');
-  };
+    // Validaciones previas
+    if (availableStock < quantity) {
+      addNotification('error', `Solo hay ${availableStock} unidades disponibles`);
+      return;
+    }
+    
+    setIsBuyingNow(true);
+    try {
+      addNotification('info', 'Procesando compra...');
+      // Create a CartItem with the required properties
+      const cartItem: CartItem = {
+        ...product,
+        quantity,
+        // Ensure all required Product properties are included
+        id: product.id,
+        name: product.name,
+        price: product.price,
+        category: product.category,
+        image: product.image,
+        description: product.description,
+        duration: product.duration,
+        accounts: product.accounts || []
+      };
+      
+      addToCart(cartItem);
+      addNotification('success', '¡Compra realizada exitosamente! Revisa tu email para las credenciales.');
+      navigate('/checkout');
+    } catch (error) {
+      console.error('Error en compra directa:', error);
+      addNotification('error', 'Error al procesar la compra. Inténtalo nuevamente.');
+    } finally {
+      setIsBuyingNow(false);
+    }
+  }, [isAuthenticated, product, quantity, addToCart, addNotification, navigate, id]);
 
   if (loading) {
     return (
@@ -175,57 +202,136 @@ const ProductDetail = () => {
             </p>
           </div>
           
+          {/* Stock y cantidad */}
           <div className="mb-6">
-            <label htmlFor="quantity" className="block text-sm font-medium text-gray-700 mb-2">
-              Cantidad
-            </label>
-            <div className="flex items-center">
-              <button
-                onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                className="px-3 py-1 border border-gray-300 rounded-l-md bg-gray-100 hover:bg-gray-200"
-                disabled={quantity <= 1}
-              >
-                -
-              </button>
-              <span className="px-4 py-1 border-t border-b border-gray-300 bg-white">
-                {quantity}
-              </span>
-              <button
-                onClick={() => setQuantity(quantity + 1)}
-                className="px-3 py-1 border border-gray-300 rounded-r-md bg-gray-100 hover:bg-gray-200"
-                disabled={product.accounts && product.accounts.length > 0 && quantity >= product.accounts.filter(acc => !acc.isSold).length}
-              >
-                +
-              </button>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-sm font-medium text-gray-700">Cantidad:</span>
+              <div className="flex items-center space-x-2">
+                {(() => {
+                  const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
+                  if (availableStock <= 10 && availableStock > 0) {
+                    return (
+                      <span className="text-xs text-orange-600 flex items-center">
+                        <AlertCircle className="w-3 h-3 mr-1" />
+                        Solo {availableStock} disponibles
+                      </span>
+                    );
+                  } else if (availableStock === 0) {
+                    return (
+                      <span className="text-xs text-red-600 flex items-center">
+                        <AlertCircle className="w-3 h-3 mr-1" />
+                        Agotado
+                      </span>
+                    );
+                  } else {
+                    return (
+                      <span className="text-xs text-green-600 flex items-center">
+                        <CheckCircle className="w-3 h-3 mr-1" />
+                        {availableStock} disponibles
+                      </span>
+                    );
+                  }
+                })()}
+              </div>
+            </div>
+            
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center border rounded-lg">
+                <button
+                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
+                  className="p-2 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={quantity <= 1 || isAddingToCart || isBuyingNow}
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+                <span className="px-4 py-2 border-x min-w-[60px] text-center font-medium">{quantity}</span>
+                <button
+                  onClick={() => {
+                    const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
+                    if (quantity < availableStock) {
+                      setQuantity(quantity + 1);
+                    }
+                  }}
+                  className="p-2 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={(() => {
+                    const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
+                    return quantity >= availableStock || isAddingToCart || isBuyingNow;
+                  })()}
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+              
+              <div className="text-sm text-gray-600">
+                Total: <span className="font-bold text-yellow-600">{(product.price * quantity).toFixed(2)} pts</span>
+              </div>
             </div>
           </div>
           
           <div className="space-y-3">
             <button
               onClick={handleBuyNow}
-              disabled={!product.accounts || product.accounts.length === 0 || product.accounts.every(acc => acc.isSold)}
-              className={`w-full flex items-center justify-center px-6 py-3 rounded-md text-white font-medium ${
-                !product.accounts || product.accounts.length === 0 || product.accounts.every(acc => acc.isSold)
-                  ? 'bg-gray-400 cursor-not-allowed'
-                  : 'bg-yellow-500 hover:bg-yellow-600'
+              disabled={(() => {
+                const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
+                return !isAuthenticated || availableStock < quantity || isAddingToCart || isBuyingNow;
+              })()} 
+              className={`w-full flex items-center justify-center px-6 py-3 rounded-md font-medium transition-all duration-300 ${
+                (() => {
+                  const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
+                  return isAuthenticated && availableStock >= quantity && !isAddingToCart && !isBuyingNow
+                    ? 'bg-yellow-500 hover:bg-yellow-600 text-white hover:shadow-lg transform hover:scale-105'
+                    : 'bg-gray-400 text-gray-600 cursor-not-allowed';
+                })()
               }`}
             >
-              <CreditCard className="w-5 h-5 mr-2" />
-              Comprar ahora
+              {isBuyingNow ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2"></div>
+                  <span>Procesando...</span>
+                </>
+              ) : (
+                <>
+                  <CreditCard className="w-5 h-5 mr-2" />
+                  Comprar ahora
+                </>
+              )}
             </button>
             
             <button
               onClick={handleAddToCart}
-              disabled={!product.accounts || product.accounts.length === 0 || product.accounts.every(acc => acc.isSold)}
-              className={`w-full flex items-center justify-center px-6 py-3 border border-yellow-500 rounded-md font-medium ${
-                !product.accounts || product.accounts.length === 0 || product.accounts.every(acc => acc.isSold)
-                  ? 'text-gray-400 border-gray-300 cursor-not-allowed'
-                  : 'text-yellow-600 hover:bg-yellow-50'
+              disabled={(() => {
+                const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
+                return !isAuthenticated || availableStock < quantity || isAddingToCart || isBuyingNow;
+              })()} 
+              className={`w-full flex items-center justify-center px-6 py-3 border rounded-md font-medium transition-all duration-300 ${
+                (() => {
+                  const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
+                  return isAuthenticated && availableStock >= quantity && !isAddingToCart && !isBuyingNow
+                    ? 'border-yellow-500 text-yellow-600 hover:bg-yellow-50 hover:shadow-lg'
+                    : 'border-gray-300 text-gray-400 cursor-not-allowed';
+                })()
               }`}
             >
-              <ShoppingCart className="w-5 h-5 mr-2" />
-              Añadir al carrito
+              {isAddingToCart ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-yellow-600 mr-2"></div>
+                  <span>Agregando...</span>
+                </>
+              ) : (
+                <>
+                  <ShoppingCart className="w-5 h-5 mr-2" />
+                  Añadir al carrito
+                </>
+              )}
             </button>
+            
+            {!isAuthenticated && (
+              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-800 text-center">
+                  <span className="font-medium">¡Inicia sesión</span> para comprar este producto
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>

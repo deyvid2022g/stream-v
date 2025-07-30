@@ -1,32 +1,73 @@
-import React from 'react';
-import { Minus, Plus, Trash2, ShoppingBag, CreditCard } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Minus, Plus, Trash2, ShoppingBag, CreditCard, AlertCircle, CheckCircle, RefreshCw } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
 import { useOrders } from '../context/OrderContext';
 import { useNotifications } from '../context/NotificationContext';
-import { useProducts } from '../context/ProductContext';
-import { Order } from '../types/order';
+import useProducts from '../context/ProductContext';
 
 const Cart: React.FC = () => {
-  const { items: allItems, removeFromCart, updateQuantity, clearCart } = useCart();
-  const { user, updateUserBalance } = useAuth();
+  const { 
+    items: allItems, 
+    removeFromCart, 
+    updateQuantity, 
+    clearCart, 
+    validateCart, 
+    getCartSummary,
+    isLoading: cartLoading
+  } = useCart();
+  const { user } = useAuth();
   const { createOrder } = useOrders();
   const { addNotification } = useNotifications();
-  const { products, markAccountAsSold } = useProducts();
+  const { products } = useProducts();
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [lastCheckoutAttempt, setLastCheckoutAttempt] = useState(0);
+  const [cartValidation, setCartValidation] = useState<{ isValid: boolean; issues: string[] }>({ isValid: true, issues: [] });
   
-  // Filter out any undefined or invalid items before rendering
-  const items = allItems.filter(item => 
-    item && 
-    typeof item.id === 'string' &&
-    typeof item.price === 'number' && 
-    typeof item.quantity === 'number' &&
-    item.quantity > 0
+  // Filter out any undefined or invalid items before rendering (memoized to prevent infinite re-renders)
+  const filteredItems = useMemo(() => 
+    allItems.filter(item => 
+      item && 
+      typeof item.id === 'string' &&
+      typeof item.price === 'number' && 
+      typeof item.quantity === 'number' &&
+      item.quantity > 0
+    ), [allItems]
   );
   
-  const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  // Use optimized cart summary
+  const cartSummary = useMemo(() => getCartSummary(), [getCartSummary]);
+  const { total: cartTotal, itemCount, hasStockIssues, stockIssues } = cartSummary;
 
-  const handleCheckout = async () => {
-    if (items.length === 0) {
+  // Validate cart when items change
+  useEffect(() => {
+    const validateCartItems = async () => {
+      if (filteredItems.length > 0) {
+        const validation = await validateCart();
+        setCartValidation(validation);
+      } else {
+        setCartValidation({ isValid: true, issues: [] });
+      }
+    };
+    
+    validateCartItems();
+  }, [filteredItems, validateCart]);
+
+  const handleCheckout = useCallback(async () => {
+    // Prevenir múltiples clics rápidos (debounce de 3 segundos)
+    const now = Date.now();
+    if (now - lastCheckoutAttempt < 3000) {
+      addNotification('warning', 'Por favor espera antes de intentar nuevamente');
+      return;
+    }
+    
+    if (isProcessing || cartLoading) {
+      addNotification('warning', 'Ya hay una operación en proceso');
+      return;
+    }
+
+    // Validaciones previas usando las nuevas funcionalidades
+    if (filteredItems.length === 0) {
       addNotification('warning', 'El carrito está vacío');
       return;
     }
@@ -36,304 +77,105 @@ const Cart: React.FC = () => {
       return;
     }
 
-    // Verificar stock antes de proceder al pago
-    const stockIssues = [];
-    const itemsToProcess: string[] = [];
-    
-    // Crear un mapa de productos para verificación de stock
-    const productsMap = new Map(products.map(p => [p.id, p]));
-    
-    for (const item of items) {
-      const product = productsMap.get(item.id);
-      if (!product) {
-        stockIssues.push(`El producto "${item.name}" ya no está disponible`);
-        continue;
-      }
-      
-      // Verificar stock real basado en cuentas no vendidas
-      const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
-      
-      if (availableStock === 0) {
-        stockIssues.push(`El producto "${item.name}" está agotado`);
-      } else if (availableStock < item.quantity) {
-        stockIssues.push(
-          `Solo hay ${availableStock} ${availableStock === 1 ? 'unidad' : 'unidades'} ` +
-          `disponible${availableStock === 1 ? '' : 's'} de "${item.name}". ` +
-          `Tienes ${item.quantity} en el carrito.`
-        );
-      } else {
-        // Si hay stock suficiente, marcar para procesar este artículo
-        itemsToProcess.push(item.id);
-      }
-    }
-    
-    if (stockIssues.length > 0) {
-      stockIssues.forEach(issue => addNotification('warning', issue));
-      addNotification('error', 'Por favor actualiza tu carrito antes de continuar');
+    if (user.balance < cartTotal) {
+      addNotification('warning', `Saldo insuficiente. Necesitas ${(cartTotal - user.balance).toFixed(0)} puntos más.`);
       return;
     }
-    
-    if (user.balance < total) {
-      addNotification('warning', 'Saldo insuficiente. Por favor, carga saldo para continuar.');
+
+    // Usar la validación optimizada del carrito
+    if (!cartValidation.isValid) {
+      cartValidation.issues.forEach(issue => addNotification('error', issue));
       return;
     }
+
+    // Validación adicional en tiempo real
+    const currentValidation = await validateCart();
+    if (!currentValidation.isValid) {
+      currentValidation.issues.forEach(issue => addNotification('error', issue));
+      setCartValidation(currentValidation);
+      return;
+    }
+
+    setIsProcessing(true);
+    setLastCheckoutAttempt(now);
 
     try {
-      // Crear la orden solo con los artículos que se pueden comprar
-      const itemsToPurchase = items.filter(item => itemsToProcess.includes(item.id));
+      addNotification('info', 'Procesando compra... Por favor espera');
       
-      // Verificar que hay artículos para comprar
-      if (itemsToPurchase.length === 0) {
-        addNotification('error', 'No hay productos válidos para comprar');
-        return;
-      }
-      
-      // Verificar nuevamente el saldo del usuario (podría haber cambiado)
-      const totalToPurchase = itemsToPurchase.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-      if (user.balance < totalToPurchase) {
-        addNotification('error', `Saldo insuficiente. Necesitas ${totalToPurchase} puntos para completar la compra.`);
-        return;
-      }
-      
-      // Verificar nuevamente el stock de los productos
-      const stockVerification = [];
-      for (const item of itemsToPurchase) {
-        const product = productsMap.get(item.id);
-        if (!product) {
-          stockVerification.push({
-            productId: item.id,
-            productName: item.name,
-            error: 'Producto no encontrado'
-          });
-          continue;
-        }
-        
-        const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
-        if (availableStock < item.quantity) {
-          stockVerification.push({
-            productId: item.id,
-            productName: item.name,
-            requested: item.quantity,
-            available: availableStock
-          });
-        }
-      }
-      
-      if (stockVerification.length > 0) {
-        console.error('Verificación de stock fallida:', stockVerification);
-        stockVerification.forEach(issue => {
-          if (issue.available !== undefined && issue.requested !== undefined) {
-            if (issue.available === 0) {
-              addNotification('warning', `El producto "${issue.productName}" está agotado`);
-            } else if (issue.available < issue.requested) {
-              addNotification('warning', `Solo hay ${issue.available} unidades disponibles de "${issue.productName}". Tienes ${issue.requested} en el carrito.`);
-            }
-          } else {
-            addNotification('warning', `Error al verificar el stock de "${issue.productName}"`);
-          }
-        });
-        addNotification('error', 'Por favor actualiza tu carrito antes de continuar');
-        return;
-      }
-      
-      // Función para marcar las cuentas como vendidas después de crear la orden
-      const markAccountsAsSold = async (order: Order) => {
-        try {
-          const markedAccounts = [];
-          const failedAccounts = [];
-          
-          for (const item of itemsToPurchase) {
-            const product = productsMap.get(item.id);
-            if (product?.accounts) {  
-              // Obtener cuentas disponibles (no vendidas)
-              const availableAccounts = product.accounts.filter(acc => !acc.isSold);
-              
-              // Verificar nuevamente si hay suficientes cuentas disponibles
-              if (availableAccounts.length < item.quantity) {
-                failedAccounts.push({
-                  productId: product.id,
-                  productName: item.name,
-                  requested: item.quantity,
-                  available: availableAccounts.length
-                });
-                continue;
-              }
-              
-              // Tomar las primeras N cuentas disponibles (donde N es la cantidad comprada)
-              const accountsToSell = availableAccounts.slice(0, item.quantity);
-              
-              // Crear las cuentas para la orden
-              const orderAccounts = accountsToSell.map(account => ({
-                id: account.id,
-                email: account.email,
-                password: account.password,
-                productId: product.id,
-                productName: item.name
-              }));
-              
-              // Actualizar el OrderItem con las cuentas específicas
-              const orderItem = order.items.find(orderItem => orderItem.productId === item.id);
-              if (orderItem) {
-                orderItem.accounts = orderAccounts;
-              }
-              
-              // Marcar cada cuenta como vendida
-              for (const account of accountsToSell) {
-                try {
-                  await markAccountAsSold(account.id, order.id);
-                  markedAccounts.push({
-                    productId: product.id,
-                    accountId: account.id,
-                    orderId: order.id
-                  });
-                } catch (accountError) {
-                  console.error(`Error al marcar cuenta ${account.id} como vendida:`, accountError);
-                  failedAccounts.push({
-                    productId: product.id,
-                    productName: item.name,
-                    accountId: account.id,
-                    error: accountError instanceof Error ? accountError.message : 'Error desconocido'
-                  });
-                }
-              }
-            }
-          }
-          
-          // Si hay cuentas que no se pudieron marcar como vendidas
-          if (failedAccounts.length > 0) {
-            console.error('Algunas cuentas no pudieron ser marcadas como vendidas:', failedAccounts);
-            
-            // Agrupar errores por producto para mostrar notificaciones más claras
-            const groupedErrors = failedAccounts.reduce((acc, curr) => {
-              const key = curr.productId;
-              if (!acc[key]) {
-                acc[key] = {
-                  productName: curr.productName,
-                  count: 0,
-                  errors: []
-                };
-              }
-              acc[key].count++;
-              if (curr.error) {
-                acc[key].errors.push(curr.error);
-              }
-              return acc;
-            }, {} as Record<string, {productName: string, count: number, errors: string[]}>);
-            
-            // Mostrar notificaciones específicas para cada producto con error
-            Object.values(groupedErrors).forEach(group => {
-              addNotification('error', `Error al procesar ${group.count} cuenta(s) de "${group.productName}". Por favor, intenta nuevamente.`);
-            });
-            
-            throw new Error(`No se pudieron procesar ${failedAccounts.length} cuentas`);
-          }
-          
-          // No need to return anything as the callback should return Promise<void>
-        } catch (error) {
-          console.error('Error al marcar cuentas como vendidas:', error);
-          throw error; // Relanzar el error para manejarlo en el catch externo
-        }
-      };
-
-      // Crear la orden
-      const order = await createOrder(itemsToPurchase);
+      const order = await createOrder(filteredItems);
       
       if (!order) {
         throw new Error('No se pudo crear la orden');
       }
       
-      // Convertir Order de index.ts a Order de order.ts
-      const orderWithUserInfo: Order = {
-        ...order,
-        userEmail: user.email || '',
-        paymentMethod: 'points',
-        items: order.items.map(item => ({
-          id: item.id,
-          productId: item.id, // Usar el id del item como productId
-          name: item.name,
-          price: item.price,
-          quantity: item.quantity,
-          accounts: [], // Se llenará en markAccountsAsSold
-          type: 'digital' as const
-        }))
-      };
+      clearCart();
       
-      // Marcar las cuentas como vendidas después de crear la orden
-      await markAccountsAsSold(orderWithUserInfo);
-      
-      // Actualizar el saldo del usuario
-      const newBalance = user.balance - total;
-      await updateUserBalance(newBalance);
-      
-      // Eliminar solo los artículos comprados del carrito
-      itemsToProcess.forEach(itemId => removeFromCart(itemId));
-      
-      // Redirigir a la tienda con mensaje de éxito
       addNotification('success', `¡Compra realizada exitosamente! Orden #${order.id.slice(-6)}`);
       
-      // Simular envío de credenciales por correo
       setTimeout(() => {
-        addNotification('info', 'Las credenciales han sido enviadas a tu email');
-      }, 2000);
+        addNotification('info', 'Las credenciales están disponibles en tu historial de pedidos');
+      }, 1500);
       
     } catch (error: unknown) {
       console.error('Error al procesar la compra:', error);
       
-      // Manejar diferentes tipos de errores con mensajes específicos
       if (error instanceof Error) {
-        // Si el error contiene información sobre cuentas no procesadas
-        if (error.message.includes('No se pudieron procesar')) {
-          // Ya se mostraron notificaciones específicas en markAccountsAsSold
-          addNotification('error', 'Hubo problemas al procesar algunas cuentas. Por favor, intenta nuevamente.');
-        } 
-        // Si es un error de saldo insuficiente
-        else if (error.message.includes('Saldo insuficiente')) {
+        if (error.message.includes('Saldo insuficiente')) {
           addNotification('error', error.message);
-        }
-        // Si es un error de stock
-        else if (error.message.includes('stock') || error.message.includes('disponible')) {
-          addNotification('error', 'Algunos productos ya no están disponibles. Por favor, actualiza tu carrito.');
-        }
-        // Para otros errores con mensaje
-        else {
+        } else if (error.message.includes('stock') || error.message.includes('disponible')) {
+          addNotification('error', 'Stock insuficiente. Algunos productos ya no están disponibles.');
+          // Revalidar carrito después del error de stock
+          const revalidation = await validateCart();
+          setCartValidation(revalidation);
+        } else if (error.message.includes('Usuario no encontrado')) {
+          addNotification('error', 'Error de autenticación. Por favor, inicia sesión nuevamente.');
+        } else {
           addNotification('error', `Error: ${error.message}`);
         }
       } else {
-        // Error genérico
-        addNotification('error', 'Error al procesar la compra. Intenta nuevamente.');
+        addNotification('error', 'Error inesperado. Por favor, intenta nuevamente.');
       }
+    } finally {
+      setIsProcessing(false);
     }
-  };
+  }, [filteredItems, user, cartTotal, createOrder, clearCart, addNotification, isProcessing, cartLoading, lastCheckoutAttempt, cartValidation, validateCart]);
 
-  const handleQuantityChange = (productId: string, newQuantity: number) => {
+  // Función para refrescar validación del carrito
+  const refreshCartValidation = useCallback(async () => {
+    const validation = await validateCart();
+    setCartValidation(validation);
+    return validation;
+  }, [validateCart]);
+
+  const handleQuantityChange = useCallback(async (productId: string, newQuantity: number) => {
     if (newQuantity < 1) {
+      const item = filteredItems.find(i => i.id === productId);
       removeFromCart(productId);
-      addNotification('info', 'Producto eliminado del carrito');
+      addNotification('info', `"${item?.name || 'Producto'}" eliminado del carrito`);
       return;
     }
     
-    // Verificar stock disponible antes de actualizar cantidad
-    const product = products.find(p => p.id === productId);
-    if (product) {
-      const availableStock = product.accounts?.filter(acc => !acc.isSold).length || 0;
-      if (newQuantity > availableStock) {
-        addNotification('warning', `Solo hay ${availableStock} ${availableStock === 1 ? 'unidad disponible' : 'unidades disponibles'} de este producto`);
-        // Limitar la cantidad al stock disponible
-        updateQuantity(productId, availableStock);
-        return;
-      }
-    }
-    
+    // Usar la función optimizada del contexto que ya maneja validaciones
     updateQuantity(productId, newQuantity);
-  };
+    
+    // Refrescar validación después del cambio
+    setTimeout(() => {
+      refreshCartValidation();
+    }, 100);
+  }, [filteredItems, removeFromCart, updateQuantity, addNotification, refreshCartValidation]);
 
-  const handleRemoveItem = (productId: string, productName: string) => {
+  const handleRemoveItem = useCallback(async (productId: string, productName: string) => {
     if (!productId) return;
     removeFromCart(productId);
-    addNotification('info', `${productName} eliminado del carrito`);
-  };
+    addNotification('info', `"${productName}" eliminado del carrito`);
+    
+    // Refrescar validación después de eliminar
+    setTimeout(() => {
+      refreshCartValidation();
+    }, 100);
+  }, [removeFromCart, addNotification, refreshCartValidation]);
 
-  if (items.length === 0) {
+  if (filteredItems.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] p-6">
         <ShoppingBag className="w-16 h-16 text-gray-300 mb-4" />
@@ -361,8 +203,38 @@ const Cart: React.FC = () => {
             <span className="text-gray-400">›</span>
             <span className="text-gray-400">Order Complete</span>
           </nav>
-          <h1 className="text-2xl font-bold text-gray-800">Carrito de Compras ({items.length} productos)</h1>
+          <h1 className="text-2xl font-bold text-gray-800">Carrito de Compras ({filteredItems.length} productos)</h1>
         </div>
+
+        {/* Alertas de stock y validación */}
+        {(hasStockIssues || !cartValidation.isValid) && (
+          <div className="mb-4 bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-r-lg">
+            <div className="flex items-start justify-between">
+              <div className="flex items-start">
+                <AlertCircle className="w-5 h-5 text-yellow-400 mt-0.5 mr-3 flex-shrink-0" />
+                <div>
+                  <h3 className="text-sm font-medium text-yellow-800 mb-2">Problemas detectados en el carrito:</h3>
+                  <ul className="text-sm text-yellow-700 space-y-1">
+                    {stockIssues.map((issue, index) => (
+                      <li key={`stock-${index}`}>• {issue}</li>
+                    ))}
+                    {cartValidation.issues.map((issue, index) => (
+                      <li key={`validation-${index}`}>• {issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+              <button
+                onClick={refreshCartValidation}
+                className="ml-4 p-2 text-yellow-600 hover:text-yellow-800 hover:bg-yellow-100 rounded-lg transition-colors"
+                title="Refrescar validación"
+                disabled={cartLoading}
+              >
+                <RefreshCw className={`w-4 h-4 ${cartLoading ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
           {/* Cart Items */}
@@ -371,13 +243,14 @@ const Cart: React.FC = () => {
               {/* Cart Header */}
               <div className="bg-gray-50 px-6 py-4 border-b">
                 <div className="flex justify-between items-center">
-                  <h3 className="font-semibold text-gray-800">Productos</h3>
+                  <h3 className="font-semibold text-gray-800">Productos ({itemCount} items)</h3>
                   <button
                     onClick={() => {
                       clearCart();
                       addNotification('info', 'Carrito vaciado');
                     }}
-                    className="text-red-500 hover:text-red-700 text-sm font-medium"
+                    className="text-red-500 hover:text-red-700 text-sm font-medium transition-colors"
+                    disabled={isProcessing}
                   >
                     Vaciar carrito
                   </button>
@@ -385,7 +258,7 @@ const Cart: React.FC = () => {
               </div>
 
               <div className="divide-y divide-gray-200">
-                {items.map(item => (
+                {filteredItems.map(item => (
                   <div key={item.id} className="p-4 lg:p-6 flex flex-col sm:flex-row items-start sm:items-center space-y-4 sm:space-y-0 sm:space-x-4">
                     {item.image && (
                       <img 
@@ -422,14 +295,24 @@ const Cart: React.FC = () => {
                       <div className="flex items-center space-x-2 bg-gray-100 rounded-lg">
                         <button
                           onClick={() => handleQuantityChange(item.id, item.quantity - 1)}
-                          className="p-2 hover:bg-gray-200 rounded-l-lg transition-colors"
+                          className="p-2 hover:bg-gray-200 rounded-l-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={isProcessing}
                         >
                           <Minus className="w-4 h-4" />
                         </button>
                         <span className="w-8 text-center">{item.quantity}</span>
                         <button
                           onClick={() => handleQuantityChange(item.id, item.quantity + 1)}
-                          className="p-2 hover:bg-gray-200 rounded-r-lg transition-colors"
+                          className="p-2 hover:bg-gray-200 rounded-r-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          disabled={isProcessing || (() => {
+                            const product = products.find(p => p.id === item.id);
+                            // Solo verificar stock si el producto tiene accounts
+                            if (!product?.accounts || !Array.isArray(product.accounts)) {
+                              return false; // No hay restricciones de stock
+                            }
+                            const availableStock = product.accounts.filter(acc => !acc.isSold).length;
+                            return item.quantity >= availableStock;
+                          })()}
                         >
                           <Plus className="w-4 h-4" />
                         </button>
@@ -441,11 +324,39 @@ const Cart: React.FC = () => {
                       </div>
                       <button
                         onClick={() => handleRemoveItem(item.id, item.name)}
-                        className="p-2 text-red-500 hover:bg-red-50 rounded transition-colors"
+                        className="p-2 text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isProcessing}
                       >
                         <Trash2 className="w-5 h-5" />
                       </button>
                     </div>
+                    
+                    {/* Stock indicator */}
+                    {(() => {
+                      const product = products.find(p => p.id === item.id);
+                      // Solo mostrar indicador de stock si el producto tiene accounts
+                      if (!product?.accounts || !Array.isArray(product.accounts)) {
+                        return null; // No mostrar indicador para productos sin accounts
+                      }
+                      
+                      const availableStock = product.accounts.filter(acc => !acc.isSold).length;
+                      if (availableStock <= 5 && availableStock > 0) {
+                        return (
+                          <div className="mt-2 text-xs text-orange-600 flex items-center">
+                            <AlertCircle className="w-3 h-3 mr-1" />
+                            Solo quedan {availableStock} unidades
+                          </div>
+                        );
+                      } else if (availableStock === 0) {
+                        return (
+                          <div className="mt-2 text-xs text-red-600 flex items-center">
+                            <AlertCircle className="w-3 h-3 mr-1" />
+                            Producto agotado
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
                   </div>
                 ))}
               </div>
@@ -461,21 +372,20 @@ const Cart: React.FC = () => {
             
             <div className="space-y-3 mb-4">
               <div className="flex justify-between">
-                <span className="text-gray-600">Subtotal ({items.length} productos)</span>
-                <span className="font-semibold">${total.toLocaleString()}</span>
+                <span className="text-gray-600">Subtotal ({itemCount} items)</span>
+                <span className="font-semibold">{cartTotal.toFixed(0)} pts</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-600">Descuentos</span>
-                <span className="font-semibold text-green-600">-$0</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Impuestos</span>
-                <span className="font-semibold">$0</span>
+                <span className="text-gray-600">Envío digital</span>
+                <span className="font-semibold text-green-600 flex items-center">
+                  <CheckCircle className="w-3 h-3 mr-1" />
+                  Gratis
+                </span>
               </div>
               <div className="border-t pt-3">
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-bold">Total</span>
-                  <span className="text-lg font-bold text-yellow-600">${total.toLocaleString()}</span>
+                  <span className="text-lg font-bold text-yellow-600">{cartTotal.toFixed(0)} pts</span>
                 </div>
               </div>
             </div>
@@ -483,17 +393,16 @@ const Cart: React.FC = () => {
             <div className="mb-4 p-3 bg-gray-50 rounded-lg">
               <div className="flex justify-between items-center">
                 <span className="text-sm text-gray-600">Tu saldo actual:</span>
-                <span className="font-bold text-gray-900">${user?.balance?.toLocaleString() || 0}</span>
+                <span className="font-bold text-gray-900">{user?.balance?.toFixed(0) || 0} pts</span>
               </div>
-              {user && user.balance < total && (
+              {user && user.balance < cartTotal ? (
                 <p className="text-sm text-red-500 mt-1 flex items-center">
-                  <span className="w-2 h-2 bg-red-500 rounded-full mr-2"></span>
+                  <AlertCircle className="w-3 h-3 mr-1" />
                   Saldo insuficiente
                 </p>
-              )}
-              {user && user.balance >= total && (
+              ) : (
                 <p className="text-sm text-green-600 mt-1 flex items-center">
-                  <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
+                  <CheckCircle className="w-3 h-3 mr-1" />
                   Saldo suficiente
                 </p>
               )}
@@ -501,32 +410,59 @@ const Cart: React.FC = () => {
 
             <button
               onClick={handleCheckout}
-              disabled={!user || user.balance < total}
+              disabled={!user || user.balance < cartTotal || hasStockIssues || !cartValidation.isValid || isProcessing || cartLoading}
               className={`w-full font-bold py-3 rounded-lg transition-all duration-300 flex items-center justify-center space-x-2 ${
-                user && user.balance >= total
+                user && user.balance >= cartTotal && !hasStockIssues && cartValidation.isValid && !isProcessing && !cartLoading
                   ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-black hover:from-yellow-500 hover:to-orange-600 hover:shadow-lg transform hover:scale-105'
                   : 'bg-gray-300 text-gray-500 cursor-not-allowed'
               }`}
             >
-              <CreditCard className="w-5 h-5" />
-              <span>PROCEDER AL PAGO</span>
+              {(isProcessing || cartLoading) ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-black"></div>
+                  <span>{cartLoading ? 'Validando...' : 'Procesando...'}</span>
+                </>
+              ) : (
+                <>
+                  <CreditCard className="w-5 h-5" />
+                  <span>PROCEDER AL PAGO</span>
+                </>
+              )}
             </button>
 
-            {user && user.balance < total && (
+            {user && user.balance < cartTotal && (
               <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <p className="text-sm text-yellow-800 mb-2">
-                  Necesitas ${(total - user.balance).toLocaleString()} más para completar esta compra
+                  Necesitas {(cartTotal - user.balance).toFixed(0)} pts más para completar esta compra
                 </p>
                 <button
                   onClick={() => {
-                    const message = `Hola, quiero cargar $${(total - user.balance).toLocaleString()} a mi cuenta de Arkion. Mi email es: ${user?.email}`;
+                    const message = `Hola, quiero cargar ${(cartTotal - user.balance).toFixed(0)} puntos a mi cuenta de Arkion. Mi email es: ${user?.email}`;
                     const whatsappUrl = `https://wa.me/573181394093?text=${encodeURIComponent(message)}`;
                     window.open(whatsappUrl, '_blank');
                   }}
-                  className="w-full bg-yellow-400 text-black font-bold py-2 rounded-lg hover:bg-yellow-500 transition-colors"
+                  className="w-full bg-yellow-400 text-black font-bold py-2 rounded-lg hover:bg-yellow-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={isProcessing}
                 >
-                  CARGAR SALDO
+                  💬 CARGAR SALDO
                 </button>
+              </div>
+            )}
+            
+            {(hasStockIssues || !cartValidation.isValid) && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <p className="text-xs text-red-700 text-center">
+                  ⚠️ Resuelve los problemas detectados antes de continuar
+                </p>
+                {!cartValidation.isValid && (
+                  <button
+                    onClick={refreshCartValidation}
+                    className="mt-2 w-full text-xs bg-red-100 hover:bg-red-200 text-red-700 py-1 px-2 rounded transition-colors"
+                    disabled={cartLoading}
+                  >
+                    {cartLoading ? 'Validando...' : 'Refrescar validación'}
+                  </button>
+                )}
               </div>
             )}
           </div>

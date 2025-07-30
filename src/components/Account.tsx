@@ -1,23 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { Package, User, LogOut, Edit, Save, X, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { Package, User, LogOut, Edit, Save, X, Clock, CheckCircle, AlertCircle, Trash2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { authService } from '../services/authService';
 import { useOrders } from '../context/OrderContext';
-import { OrderWithItems } from '../services/orderService';
-import { OrderItem } from '../types';
+import { OrderWithItems, OrderItem } from '../types/order';
+import { ProductAccount } from '../types';
 import { useNotifications } from '../context/NotificationContext';
+import { useSearchParams } from 'react-router-dom';
 
 const Account: React.FC = () => {
   const { user, updateUserProfile, logout } = useAuth();
-  const { orders, getOrdersByUser } = useOrders();
+  const { orders, getOrdersByUser, deleteOrder } = useOrders();
   const { addNotification } = useNotifications();
+  const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState('overview');
   const [isEditing, setIsEditing] = useState(false);
   const [viewingCredentials, setViewingCredentials] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [accountToDelete, setAccountToDelete] = useState<string | null>(null);
+  const [showDeleteAllConfirm, setShowDeleteAllConfirm] = useState(false);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [userOrders, setUserOrders] = useState<OrderWithItems[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
   const [editForm, setEditForm] = useState({
     username: user?.username || '',
     email: user?.email || ''
   });
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   useEffect(() => {
     if (user?.id) {
@@ -28,8 +42,18 @@ const Account: React.FC = () => {
 
 
 
+  // Check for tab parameter in URL
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (tab && ['overview', 'orders', 'profile'].includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
+
+
+
   const hasAccounts = (item: OrderItem): boolean => {
-    return 'accounts' in item && Array.isArray(item.accounts) && item.accounts.length > 0;
+    return item.accounts && Array.isArray(item.accounts) && item.accounts.length > 0;
   };
 
   const handleSaveProfile = () => {
@@ -50,6 +74,123 @@ const Account: React.FC = () => {
       email: user?.email || ''
     });
     setIsEditing(false);
+  };
+
+  const handleChangePassword = async () => {
+    if (!user) return;
+    
+    // Validaciones
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      addNotification('error', 'Todos los campos son obligatorios');
+      return;
+    }
+    
+    if (passwordForm.newPassword.length < 6) {
+      addNotification('error', 'La nueva contraseña debe tener al menos 6 caracteres');
+      return;
+    }
+    
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      addNotification('error', 'Las contraseñas no coinciden');
+      return;
+    }
+    
+    try {
+      // Verificar contraseña actual
+      const loginResult = await authService.login({ email: user.email, password: passwordForm.currentPassword });
+      
+      if (!loginResult.success) {
+        addNotification('error', 'La contraseña actual es incorrecta');
+        return;
+      }
+      
+      // Cambiar contraseña
+      const success = await authService.updateUserPassword(user.id, passwordForm.newPassword);
+      
+      if (success) {
+         addNotification('success', 'Contraseña actualizada correctamente');
+         setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+         setIsChangingPassword(false);
+       } else {
+         addNotification('error', 'Error al actualizar la contraseña');
+       }
+     } catch (error) {
+       console.error('Error changing password:', error);
+       addNotification('error', 'Error al cambiar la contraseña');
+     }
+   };
+
+   const handleCancelPasswordChange = () => {
+    setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    setIsChangingPassword(false);
+  };
+
+  const handleDeleteOrder = async (orderId: string) => {
+    setDeletingOrderId(orderId);
+    try {
+      await deleteOrder(orderId);
+      setUserOrders(prev => prev.filter(order => order.id !== orderId));
+      addNotification('success', 'Pedido eliminado exitosamente');
+    } catch (error) {
+      console.error('Error:', error);
+      addNotification('error', 'Error al eliminar el pedido');
+    } finally {
+      setDeletingOrderId(null);
+    }
+  };
+
+  const handleDeleteAllOrders = async () => {
+    if (!user) return;
+    
+    setLoadingOrders(true);
+    try {
+      // Eliminar todos los pedidos uno por uno
+      const deletePromises = userOrders.map(order => deleteOrder(order.id));
+      await Promise.all(deletePromises);
+      
+      setUserOrders([]);
+      setShowDeleteAllConfirm(false);
+      addNotification('success', 'Historial de pedidos eliminado exitosamente');
+    } catch (error) {
+      console.error('Error:', error);
+      addNotification('error', 'Error al eliminar el historial de pedidos');
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  // Confirmation modals
+  const DeleteConfirmModal = ({ isOpen, onClose, onConfirm, title, message }: {
+    isOpen: boolean;
+    onClose: () => void;
+    onConfirm: () => void;
+    title: string;
+    message: string;
+  }) => {
+    if (!isOpen) return null;
+
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">{title}</h3>
+          <p className="text-gray-600 mb-6">{message}</p>
+          <div className="flex justify-end space-x-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={onConfirm}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+            >
+              Eliminar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // Helper function to safely format dates
@@ -127,6 +268,19 @@ const Account: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-4">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-semibold">Mis Pedidos</h3>
+                  {userOrders.length > 0 && (
+                    <button
+                      onClick={() => setShowDeleteAllConfirm(true)}
+                      className="flex items-center space-x-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                     >
+                       <Trash2 className="h-4 w-4" />
+                       <span>Eliminar Historial</span>
+                    </button>
+                  )}
+                </div>
+                
                 {userOrders.filter((order: OrderWithItems) => order && order.items && Array.isArray(order.items)).map((order: OrderWithItems) => (
                   <div key={order.id} className="border border-gray-200 rounded-lg p-4">
                     <div className="flex justify-between items-start mb-3">
@@ -139,6 +293,7 @@ const Account: React.FC = () => {
                       <div className="flex items-center space-x-2">
                         {getStatusIcon(order.status)}
                         <span className="text-sm font-medium">{getStatusText(order.status)}</span>
+
                       </div>
                     </div>
                     
@@ -152,24 +307,24 @@ const Account: React.FC = () => {
                     </div>
                     
                     <div className="border-t pt-2">
-                      <div className="flex justify-between items-center">
-                        <span className="font-semibold">Total: ${order.total.toLocaleString()}</span>
-                        {order.status === 'completed' && order.items.some(item => hasAccounts(item) && item.accounts.length > 0) && (
-                          <button 
-                            onClick={() => setViewingCredentials(viewingCredentials === order.id ? null : order.id)}
-                            className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                          >
-                            {viewingCredentials === order.id ? 'Ocultar credenciales' : 'Ver credenciales'}
-                          </button>
-                        )}
-                      </div>
+                      <div className="flex justify-between items-center mb-2">
+                          <span className="font-semibold">Total: ${order.total.toLocaleString()}</span>
+                          {order.status === 'completed' && order.items.some(item => hasAccounts(item) && item.accounts.length > 0) && (
+                            <button 
+                              onClick={() => setViewingCredentials(viewingCredentials === order.id ? null : order.id)}
+                              className="px-4 py-2 bg-green-600 text-white text-sm font-bold rounded-lg hover:bg-green-700 transition-colors shadow-md border-2 border-green-500"
+                            >
+                              {viewingCredentials === order.id ? 'Ocultar Credencial' : 'Mostrar Credencial'}
+                            </button>
+                          )}
+                        </div>
                       {viewingCredentials === order.id && (
                         <div className="mt-2 p-3 bg-gray-50 rounded-md">
                           <h4 className="font-medium text-gray-800 mb-2">Credenciales:</h4>
                           {order.items
                             .filter(hasAccounts)
-                            .flatMap((item) => 
-                              item.accounts.map((account, idx, accounts) => (
+                            .flatMap((item: OrderItem) => 
+                              item.accounts.map((account: ProductAccount, idx: number, accounts: ProductAccount[]) => (
                                 <React.Fragment key={`${item.id}-${account.id || idx}`}>
                                   <div className="text-sm text-gray-700 mb-2">
                                     <p><span className="font-medium">Producto:</span> {item.name}</p>
@@ -266,6 +421,79 @@ const Account: React.FC = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Total de pedidos</label>
                 <p className="text-gray-900 py-2">{userOrders.length}</p>
               </div>
+            </div>
+            
+            {/* Cambio de Contraseña */}
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">Cambiar Contraseña</h3>
+              {!isChangingPassword ? (
+                <button
+                  onClick={() => setIsChangingPassword(true)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Cambiar Contraseña
+                </button>
+              ) : (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Contraseña Actual
+                    </label>
+                    <input
+                      type="password"
+                      value={passwordForm.currentPassword}
+                      onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Ingresa tu contraseña actual"
+                      autoComplete="current-password"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Nueva Contraseña
+                    </label>
+                    <input
+                      type="password"
+                      value={passwordForm.newPassword}
+                      onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Ingresa tu nueva contraseña"
+                      autoComplete="new-password"
+                      required
+                      minLength={6}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Confirmar Nueva Contraseña
+                    </label>
+                    <input
+                      type="password"
+                      value={passwordForm.confirmPassword}
+                      onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      autoComplete="new-password"
+                      placeholder="Confirma tu nueva contraseña"
+                    />
+                  </div>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={handleChangePassword}
+                      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      Guardar
+                    </button>
+                    <button
+                      onClick={handleCancelPasswordChange}
+                      className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center"
+                    >
+                      <X className="w-4 h-4 mr-2" />
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -420,6 +648,15 @@ const Account: React.FC = () => {
           <p>arkion © 2024. Todos los Derechos Reservados</p>
         </div>
       </div>
+
+      {/* Delete Confirmation Modals */}
+      <DeleteConfirmModal
+        isOpen={showDeleteAllConfirm}
+        onClose={() => setShowDeleteAllConfirm(false)}
+        onConfirm={handleDeleteAllOrders}
+        title="Eliminar Todo el Historial"
+        message="¿Estás seguro de que quieres eliminar todo tu historial de pedidos? Esta acción no se puede deshacer."
+      />
     </div>
   );
 };

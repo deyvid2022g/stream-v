@@ -82,3 +82,17 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Ocultar texto suelto en ProductCard */
+.product-card-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Asegurarse de que no haya texto suelto fuera de los contenedores */
+.product-card-wrapper::before,
+.product-card-wrapper::after {
+  content: "";
+  display: table;
+  clear: both;
+}

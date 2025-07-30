@@ -1,12 +1,6 @@
 export type OrderStatus = 'pending' | 'processing' | 'completed' | 'cancelled';
 
-export interface OrderItemProductAccount {
-  id: string;
-  email: string;
-  password: string;
-  productId: string;
-  productName: string;
-}
+import { ProductAccount } from './index';
 
 export interface OrderItem {
   id: string;
@@ -14,7 +8,7 @@ export interface OrderItem {
   name: string;
   price: number;
   quantity: number;
-  accounts: OrderItemProductAccount[]; // For digital products with accounts
+  accounts: ProductAccount[]; // For digital products with accounts
   type: 'physical' | 'digital';
 }
 
@@ -47,4 +41,8 @@ export interface Order {
   deliveredAt?: string | Date;
   cancelledAt?: string | Date;
   cancelledReason?: string;
+}
+
+export interface OrderWithItems extends Order {
+  items: OrderItem[];
 }

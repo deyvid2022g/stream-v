@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { Product, ProductAccount } from '../types';
 import { productService } from '../services/productService';
 
@@ -17,12 +17,14 @@ interface ProductContextType {
   getAvailableAccounts: (productId: string) => ProductAccount[];
   getSoldAccounts: (productId: string) => ProductAccount[];
   getAllAccounts: (productId: string) => ProductAccount[];
+  fetchProducts: () => Promise<void>;
+  refreshProducts: () => Promise<void>;
   clearError: () => void;
 }
 
 const ProductContext = createContext<ProductContextType | undefined>(undefined);
 
-export const ProductProvider = ({ children }: { children: ReactNode }) => {
+const ProductProvider = ({ children }: { children: ReactNode }) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [productAccounts, setProductAccounts] = useState<ProductAccount[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -62,7 +64,8 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
     loadData();
   }, []);
 
-  const addProduct = async (productData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
+  // Optimización: Memoizar funciones para evitar re-renders
+  const addProduct = useCallback(async (productData: Omit<Product, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
       const newProduct = await productService.createProduct(productData);
       if (newProduct) {
@@ -74,22 +77,56 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
       setError('Error adding product');
       throw error;
     }
-  };
+  }, []);
 
-  const updateProduct = async (id: string, updates: Partial<Product>) => {
+  const fetchProducts = useCallback(async () => {
     try {
-      await productService.updateProduct(id, updates);
-      setProducts(prev => prev.map(product => 
-        product.id === id ? { ...product, ...updates } : product
-      ));
+      setLoading(true);
+      const [productsData, accountsData] = await Promise.all([
+        productService.getAllProducts(),
+        productService.getAllProductAccounts()
+      ]);
+      
+      const products: Product[] = productsData.map(p => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        price: p.price,
+        discount: p.discount,
+        image: p.image,
+        category: p.category,
+        duration: p.duration,
+        accounts: p.accounts || []
+      }));
+      
+      setProducts(products);
+      setProductAccounts(accountsData);
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      setError('Error fetching products');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const updateProduct = useCallback(async (id: string, updates: Partial<Product>) => {
+    try {
+      const success = await productService.updateProduct(id, updates);
+      if (success) {
+        // Refresh the product list to get the latest data from the database
+        fetchProducts();
+        console.log('Product updated and list refreshed');
+      } else {
+        throw new Error('Failed to update product');
+      }
     } catch (error) {
       console.error('Error updating product:', error);
       setError('Error updating product');
       throw error;
     }
-  };
+  }, [fetchProducts]);
 
-  const deleteProduct = async (id: string) => {
+  const deleteProduct = useCallback(async (id: string) => {
     try {
       await productService.deleteProduct(id);
       setProducts(prev => prev.filter(product => product.id !== id));
@@ -100,13 +137,13 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
       setError('Error deleting product');
       throw error;
     }
-  };
+  }, []);
 
   const getProductById = (productId: string): Product | undefined => {
     return products.find(p => p.id === productId);
   };
 
-  const addProductAccount = async (productId: string, accountData: { email: string; password: string; additionalInfo?: string }) => {
+  const addProductAccount = useCallback(async (productId: string, accountData: { email: string; password: string; additionalInfo?: string }) => {
     try {
       const newAccount = await productService.addProductAccount(productId, accountData);
       if (newAccount) {
@@ -127,9 +164,9 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
       console.error('Error adding product account:', error);
       throw error;
     }
-  };
+  }, [productAccounts]);
 
-  const deleteProductAccount = async (accountId: string) => {
+  const deleteProductAccount = useCallback(async (accountId: string) => {
     try {
       await productService.deleteProductAccount(accountId);
       
@@ -150,11 +187,9 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
       console.error('Error deleting product account:', error);
       throw error;
     }
-  };
+  }, [productAccounts]);
 
-
-
-  const markAccountAsSold = async (accountId: string, orderId: string) => {
+  const markAccountAsSold = useCallback(async (accountId: string, orderId: string) => {
     try {
       await productService.markAccountAsSold(accountId, orderId);
       
@@ -186,44 +221,94 @@ export const ProductProvider = ({ children }: { children: ReactNode }) => {
       console.error('Error marking account as sold:', error);
       throw error;
     }
-  };
+  }, [productAccounts]);
 
-  const getAvailableAccounts = (productId: string): ProductAccount[] => {
+  const getAvailableAccounts = useCallback((productId: string): ProductAccount[] => {
     return productAccounts.filter(acc => acc.productId === productId && !acc.isSold);
-  };
+  }, [productAccounts]);
 
-  const getSoldAccounts = (productId: string): ProductAccount[] => {
+  const getSoldAccounts = useCallback((productId: string): ProductAccount[] => {
     return productAccounts.filter(acc => acc.productId === productId && acc.isSold);
-  };
+  }, [productAccounts]);
 
-  const getAllAccounts = (productId: string): ProductAccount[] => {
+  const getAllAccounts = useCallback((productId: string): ProductAccount[] => {
     return productAccounts.filter(acc => acc.productId === productId);
-  };
+  }, [productAccounts]);
 
-  const clearError = () => {
+  const refreshProducts = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [productsData, accountsData] = await Promise.all([
+        productService.getAllProducts(),
+      productService.getAllProductAccounts()
+      ]);
+      
+      // Convertir ProductWithAccounts a Product incluyendo las cuentas
+      const products: Product[] = productsData.map(p => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        price: p.price,
+        discount: p.discount,
+        image: p.image,
+        category: p.category,
+        duration: p.duration,
+        accounts: p.accounts || [] // Incluir las cuentas en el producto
+      }));
+      
+      setProducts(products);
+      setProductAccounts(accountsData);
+    } catch (error) {
+      console.error('Error refreshing products data:', error);
+      setError('Error refreshing products');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const clearError = useCallback(() => {
     setError(null);
-  };
+  }, []);
+
+  const contextValue = useMemo(() => ({
+    products,
+    productAccounts,
+    loading,
+    error,
+    addProduct,
+    updateProduct,
+    deleteProduct,
+    getProductById,
+    addProductAccount,
+    deleteProductAccount,
+    markAccountAsSold,
+    getAvailableAccounts,
+    getSoldAccounts,
+    getAllAccounts,
+    fetchProducts,
+    refreshProducts,
+    clearError,
+  }), [
+    products,
+    productAccounts,
+    loading,
+    error,
+    addProduct,
+    updateProduct,
+    deleteProduct,
+    addProductAccount,
+    deleteProductAccount,
+    markAccountAsSold,
+    getAvailableAccounts,
+    getSoldAccounts,
+    getAllAccounts,
+    fetchProducts,
+    refreshProducts,
+    clearError,
+  ]);
 
   return (
-    <ProductContext.Provider
-      value={{
-        products,
-        productAccounts,
-        loading,
-        error,
-        addProduct,
-        updateProduct,
-        deleteProduct,
-        getProductById,
-        addProductAccount,
-        deleteProductAccount,
-        markAccountAsSold,
-        getAvailableAccounts,
-        getSoldAccounts,
-        getAllAccounts,
-        clearError,
-      }}
-    >
+    <ProductContext.Provider value={contextValue}>
       {children}
     </ProductContext.Provider>
   );
@@ -238,5 +323,5 @@ const useProducts = (): ProductContextType => {
   return context;
 };
 
-export { useProducts };
-export default ProductContext;
+export { ProductProvider };
+export default useProducts;

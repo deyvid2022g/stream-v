@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useProducts } from '../context/ProductContext';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import useProducts from '../context/ProductContext';
 import { useSearchParams } from 'react-router-dom';
 import ProductCard from './ProductCard';
 
@@ -8,19 +8,23 @@ const Store = () => {
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   
+  // Optimización: Memoizar función de filtrado
+  const filterProducts = useCallback((products: any[], query: string) => {
+    if (!query.trim()) {
+      return products;
+    }
+    
+    const lowerQuery = query.toLowerCase();
+    return products.filter(product => 
+      product.name.toLowerCase().includes(lowerQuery) ||
+      product.category.toLowerCase().includes(lowerQuery)
+    );
+  }, []);
+
   // Filter products based on search query (show all products regardless of stock)
   const filteredProducts = useMemo(() => {
-    // Apply search filter to all products
-    if (!searchQuery.trim()) return products;
-    
-    const query = searchQuery.toLowerCase();
-    return products.filter((product) => {
-      const nameMatch = product.name?.toLowerCase().includes(query) || false;
-      const descMatch = product.description?.toLowerCase().includes(query) || false;
-      const categoryMatch = product.category?.toLowerCase().includes(query) || false;
-      return nameMatch || descMatch || categoryMatch;
-    });
-  }, [products, searchQuery]);
+    return filterProducts(products, searchQuery);
+  }, [products, searchQuery, filterProducts]);
   
   // Handle search from URL params
   useEffect(() => {

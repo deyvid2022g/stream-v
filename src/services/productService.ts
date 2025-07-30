@@ -9,33 +9,31 @@ export interface ProductWithAccounts extends Product {
 class ProductService {
   async getAllProducts(): Promise<ProductWithAccounts[]> {
     try {
-      // Obtener productos
-      const { data: products, error: productsError } = await supabase
+      // Optimización: Una sola consulta con JOIN para obtener productos y cuentas
+      const { data: productsData, error: productsError } = await supabase
         .from('products')
-        .select('*')
+        .select(`
+          *,
+          product_accounts (
+            id,
+            email,
+            password,
+            is_sold,
+            sold_at,
+            order_id,
+            created_at
+          )
+        `)
         .order('created_at', { ascending: false })
 
-      if (productsError || !products) {
+      if (productsError || !productsData) {
         console.error('Error fetching products:', productsError)
         return []
       }
 
-      // Obtener cuentas para cada producto
-      const productsWithAccounts: ProductWithAccounts[] = []
-
-      for (const product of products) {
-        const { data: accounts, error: accountsError } = await supabase
-          .from('product_accounts')
-          .select('*')
-          .eq('product_id', product.id)
-          .order('created_at', { ascending: true })
-
-        if (accountsError) {
-          console.error('Error fetching accounts for product:', product.id, accountsError)
-          continue
-        }
-
-        const productAccounts: ProductAccount[] = (accounts || []).map(account => ({
+      // Procesar datos optimizadamente
+      const productsWithAccounts: ProductWithAccounts[] = productsData.map(product => {
+        const productAccounts: ProductAccount[] = (product.product_accounts || []).map((account: any) => ({
           id: account.id,
           email: account.email,
           password: account.password,
@@ -47,7 +45,7 @@ class ProductService {
 
         const availableCount = productAccounts.filter(account => !account.isSold).length
 
-        productsWithAccounts.push({
+        return {
           id: product.id,
           name: product.name,
           description: product.description,
@@ -55,11 +53,11 @@ class ProductService {
           discount: product.discount,
           image: product.image,
           category: product.category,
-          duration: '30 días',
+          duration: product.duration || '30 días',
           accounts: productAccounts,
           availableCount
-        })
-      }
+        }
+      })
 
       return productsWithAccounts
     } catch (error) {
@@ -159,15 +157,35 @@ class ProductService {
 
   async updateProduct(productId: string, productData: Partial<Omit<Product, 'id'>>): Promise<boolean> {
     try {
-      const { error } = await supabase
-        .from('products')
-        .update(productData)
-        .eq('id', productId)
+      // Filter out fields that don't exist in the products table schema
+      const {
+        stock,
+        initialAccounts,
+        addAccounts,
+        removeAccountIds,
+        duration,
+        ...validProductData
+      } = productData as any;
 
-      return !error
+      console.log('Updating product with ID:', productId);
+      console.log('Product data to update:', validProductData);
+
+      const { data, error } = await supabase
+        .from('products')
+        .update(validProductData)
+        .eq('id', productId)
+        .select()
+
+      if (error) {
+        console.error('Supabase error in updateProduct:', error);
+        throw new Error(`Failed to update product: ${error.message}`);
+      }
+
+      console.log('Product updated successfully:', data);
+      return true;
     } catch (error) {
       console.error('Error in updateProduct:', error)
-      return false
+      throw error;
     }
   }
 

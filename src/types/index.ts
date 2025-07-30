@@ -28,6 +28,7 @@ export interface Product {
   discount?: number;
   image: string;
   description: string;
+  duration?: string;
   stock?: number;
   rating?: number;
   reviews?: number;
@@ -45,7 +46,7 @@ export interface OrderItem {
   price: number;
   quantity: number;
   accounts: ProductAccount[];
-  type: 'product';
+  type: 'physical' | 'digital';
 }
 
 export interface Order {

@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { CartProvider } from './context/CartContext';
 import { OrderProvider } from './context/OrderContext';
 import { NotificationProvider } from './context/NotificationContext';
-import { ProductProvider } from './context/ProductContext';
+import useProducts, { ProductProvider } from './context/ProductContext';
 import Login from './components/Login';
 import Sidebar from './components/Sidebar';
 import Store from './components/Store';
@@ -113,7 +113,12 @@ const AppRoutes: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <Router>
+    <Router
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      }}
+    >
       <AppContent />
     </Router>
   );

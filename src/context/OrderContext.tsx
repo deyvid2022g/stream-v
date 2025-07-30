@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { CartItem } from '../types';
 import { useAuth } from './AuthContext';
-import { orderService, OrderWithItems } from '../services/orderService';
+import { orderService } from '../services/orderService';
+import { OrderWithItems } from '../types/order';
 
 interface OrderContextType {
   orders: OrderWithItems[];
@@ -17,7 +18,8 @@ const OrderContext = createContext<OrderContextType | undefined>(undefined);
 
 export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [orders, setOrders] = useState<OrderWithItems[]>([]);
-  const { user, updateUserBalance } = useAuth();
+  const [isCreatingOrder, setIsCreatingOrder] = useState(false);
+  const { user, refreshUser } = useAuth();
 
   useEffect(() => {
     const loadOrders = async () => {
@@ -35,23 +37,26 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const createOrder = async (items: CartItem[]): Promise<OrderWithItems | null> => {
     if (!user) return null;
 
+    // Debounce para evitar múltiples clics
+    if (isCreatingOrder) {
+      return null;
+    }
+
+    setIsCreatingOrder(true);
+
     try {
       const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-      
-      if (user.balance < total) {
-        throw new Error('Saldo insuficiente');
-      }
 
-      const order = await orderService.createOrder(user.id, user.email, items, total);
-      
+      const order = await orderService.createOrder(
+        user.id,
+        user.email,
+        items
+      );
+
       if (order) {
-        // Actualizar balance del usuario
-        const newBalance = user.balance - total;
-        await updateUserBalance(newBalance);
-        
-        // Recargar órdenes
-        const ordersData = await orderService.getAllOrders();
-        setOrders(ordersData);
+        // Actualizar el estado de las órdenes y refrescar datos del usuario
+        setOrders(prevOrders => [order, ...prevOrders]);
+        await refreshUser();
         
         return order;
       }
@@ -60,6 +65,8 @@ export const OrderProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     } catch (error) {
       console.error('Error creating order:', error);
       throw error;
+    } finally {
+      setIsCreatingOrder(false);
     }
   };
 

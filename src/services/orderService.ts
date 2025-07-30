@@ -1,115 +1,135 @@
 import { supabase } from '../lib/supabase'
-import { CartItem, OrderItem, ProductAccount } from '../types'
-import { productService } from './productService'
+import { CartItem, OrderItem } from '../types'
+import { OrderWithItems } from '../types/order'
 import { authService } from './authService'
+import { transactionService } from './transactionService'
 
-// Interface para la respuesta de Supabase
-interface SupabaseOrderItemAccount {
-  product_accounts: {
-    id: string;
-    email: string;
-    password: string;
-    product_id: string;
-    is_sold: boolean;
-  }[];
-}
 
-export interface OrderWithItems {
-  id: string;
-  userId: string;
-  userEmail: string;
-  total: number;
-  status: 'pending' | 'processing' | 'completed' | 'cancelled';
-  paymentMethod: string;
-  createdAt: Date | string;
-  items: OrderItem[];
+
+
+
+export interface OrderSummary {
+  totalOrders: number;
+  totalRevenue: number;
+  completedOrders: number;
+  cancelledOrders: number;
+  pendingOrders: number;
 }
 
 class OrderService {
-  async createOrder(userId: string, userEmail: string, cartItems: CartItem[], total: number, paymentMethod: string = 'balance'): Promise<OrderWithItems | null> {
+  /**
+   * Crea una orden usando el transactionService optimizado
+   */
+  async createOrder(userId: string, userEmail: string, cartItems: CartItem[]): Promise<OrderWithItems | null> {
     try {
-      // Crear la orden
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert({
-          user_id: userId,
-          user_email: userEmail,
-          total: total,
-          status: 'completed',
-          payment_method: paymentMethod
-        })
-        .select()
-        .single()
-
-      if (orderError || !order) {
-        console.error('Error creating order:', orderError)
-        return null
+      // Validaciones iniciales
+      if (!userId || !userEmail) {
+        throw new Error('Información de usuario inválida')
       }
-
-      // Procesar cada item del carrito
-      for (const item of cartItems) {
-        // Obtener cuentas disponibles para este producto
-        const availableAccounts = await productService.getAvailableAccounts(item.id)
-        
-        if (availableAccounts.length < item.quantity) {
-          console.error(`Not enough accounts available for product ${item.id}`)
-          // Eliminar la orden si no hay suficientes cuentas
-          await supabase.from('orders').delete().eq('id', order.id)
-          return null
-        }
-
-        // Crear item de orden
-        const { data: orderItem, error: orderItemError } = await supabase
-          .from('order_items')
-          .insert({
-            order_id: order.id,
-            product_id: item.id,
-            name: item.name,
-            quantity: item.quantity,
-            price: item.price,
-            type: 'digital'
-          })
-          .select()
-          .single()
-
-        if (orderItemError || !orderItem) {
-          console.error('Error creating order item:', orderItemError)
-          await supabase.from('orders').delete().eq('id', order.id)
-          return null
-        }
-
-        // Tomar las cuentas necesarias y asociarlas al order_item
-        const accountsToSell = availableAccounts.slice(0, item.quantity)
-        
-        for (const account of accountsToSell) {
-          // Marcar cuenta como vendida y asociarla a la orden
-          await supabase
-            .from('product_accounts')
-            .update({
-              is_sold: true,
-              order_id: order.id,
-              sold_at: new Date().toISOString()
-            })
-            .eq('id', account.id)
-          
-          // Crear relación en order_item_accounts
-          await supabase
-            .from('order_item_accounts')
-            .insert({
-              order_item_id: orderItem.id,
-              product_account_id: account.id
-            })
-        }
+      
+      if (!cartItems || cartItems.length === 0) {
+        throw new Error('El carrito está vacío')
       }
-
-      // Actualizar balance del usuario
+      
+      // Obtener información del usuario
       const user = await authService.getUserById(userId)
-      if (user) {
-        const newBalance = user.balance - total
-        await authService.updateUserBalance(userId, newBalance)
+      if (!user) {
+        throw new Error('Usuario no encontrado')
+      }
+      
+      // Usar transactionService para procesar la transacción completa
+      const result = await transactionService.processTransaction({
+        userId,
+        userEmail,
+        cartItems,
+        userBalance: user.balance,
+        onAccountAssign: async () => {
+          // Esta lógica se maneja internamente en transactionService
+          
+          // Esta lógica se maneja internamente en transactionService
+          // Solo necesitamos confirmar que las cuentas fueron asignadas
+        },
+        onBalanceUpdate: async (newBalance) => {
+          await authService.updateUserBalance(userId, newBalance)
+        }
+      })
+      
+      // Convertir el resultado a OrderWithItems
+      const orderWithItems: OrderWithItems = {
+        id: result.order.id,
+        userId: result.order.userId,
+        userEmail: result.order.userEmail,
+        total: result.order.total,
+        status: result.order.status,
+        paymentMethod: result.order.paymentMethod,
+        createdAt: new Date(result.order.createdAt),
+        completedAt: result.order.status === 'completed' ? new Date() : undefined,
+        items: await this.getOrderItems(result.order.id)
+      }
+      
+      return orderWithItems
+      
+    } catch (error) {
+      console.error('Error in createOrder:', error)
+      throw error instanceof Error ? error : new Error('Error inesperado al crear la orden')
+    }
+  }
+  
+
+
+  /**
+   * Obtiene las órdenes de un usuario con consultas optimizadas
+   */
+  async getUserOrders(userId: string): Promise<OrderWithItems[]> {
+    try {
+      if (!userId) {
+        throw new Error('ID de usuario requerido')
       }
 
-      return {
+      // Usar una sola consulta con joins para obtener toda la información
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select(`
+          id,
+          user_id,
+          user_email,
+          total,
+          status,
+          payment_method,
+          created_at,
+          completed_at,
+          cancelled_at,
+          order_items (
+            id,
+            product_id,
+            name,
+            quantity,
+            price,
+            type,
+            order_item_accounts (
+              product_accounts (
+                id,
+                email,
+                password,
+                additional_info
+              )
+            )
+          )
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+
+      if (ordersError) {
+        console.error('Error fetching user orders:', ordersError)
+        throw new Error('No se pudieron obtener las órdenes del usuario')
+      }
+
+      if (!ordersData || ordersData.length === 0) {
+        return []
+      }
+
+      // Transformar los datos al formato esperado
+      const ordersWithItems: OrderWithItems[] = ordersData.map(order => ({
         id: order.id,
         userId: order.user_id,
         userEmail: order.user_email,
@@ -117,241 +137,92 @@ class OrderService {
         status: order.status,
         paymentMethod: order.payment_method,
         createdAt: new Date(order.created_at),
-        items: []
-      }
-    } catch (error) {
-      console.error('Error in createOrder:', error)
-      return null
-    }
-  }
-
-  async getUserOrders(userId: string): Promise<OrderWithItems[]> {
-    try {
-      // Obtener órdenes del usuario
-      const { data: orders, error: ordersError } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: false })
-
-      if (ordersError || !orders) {
-        console.error('Error fetching user orders:', ordersError)
-        return []
-      }
-
-      // Obtener items para cada orden
-      const ordersWithItems: OrderWithItems[] = []
-
-      for (const order of orders) {
-        const { data: orderItems, error: itemsError } = await supabase
-          .from('order_items')
-          .select('*')
-          .eq('order_id', order.id)
-
-        if (itemsError) {
-          console.error('Error fetching order items:', itemsError)
-          continue
-        }
-
-        const items: OrderItem[] = []
-        
-        for (const item of orderItems || []) {
-          // Obtener las cuentas asociadas a este order_item
-          const { data: itemAccounts, error: accountsError } = await supabase
-            .from('order_item_accounts')
-            .select(`
-              product_accounts!inner(*)
-            `)
-            .eq('order_item_id', item.id)
-
-          if (accountsError) {
-            console.error('Error fetching item accounts:', accountsError)
-            continue
-          }
-
-          const accounts: ProductAccount[] = (itemAccounts as unknown as SupabaseOrderItemAccount[] || []).flatMap(acc => 
-            acc.product_accounts.map(pa => ({
-              id: pa.id,
-              email: pa.email,
-              password: pa.password,
-              productId: pa.product_id,
-              isSold: pa.is_sold
-            }))
-          )
-
-          items.push({
-            id: item.id,
-            productId: item.product_id,
-            name: item.name,
-            quantity: item.quantity,
-            price: item.price,
-            accounts,
-            type: item.type
-          })
-        }
-
-        ordersWithItems.push({
-          id: order.id,
-          userId: order.user_id,
-          userEmail: order.user_email,
-          total: order.total,
-          status: order.status,
-          paymentMethod: order.payment_method,
-          createdAt: new Date(order.created_at),
-          items
-        })
-      }
-
-      return ordersWithItems
-    } catch (error) {
-      console.error('Error in getUserOrders:', error)
-      return []
-    }
-  }
-
-  async getAllOrders(): Promise<OrderWithItems[]> {
-    try {
-      // Obtener todas las órdenes
-      const { data: orders, error: ordersError } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (ordersError || !orders) {
-        console.error('Error fetching all orders:', ordersError)
-        return []
-      }
-
-      // Obtener items para cada orden
-      const ordersWithItems: OrderWithItems[] = []
-
-      for (const order of orders) {
-        const { data: orderItems, error: itemsError } = await supabase
-          .from('order_items')
-          .select('*')
-          .eq('order_id', order.id)
-
-        if (itemsError) {
-          console.error('Error fetching order items:', itemsError)
-          continue
-        }
-
-        const items: OrderItem[] = []
-        
-        for (const item of orderItems || []) {
-          // Obtener las cuentas asociadas a este order_item
-          const { data: itemAccounts, error: accountsError } = await supabase
-            .from('order_item_accounts')
-            .select(`
-              product_accounts!inner(*)
-            `)
-            .eq('order_item_id', item.id)
-
-          if (accountsError) {
-            console.error('Error fetching item accounts:', accountsError)
-            continue
-          }
-
-          const accounts: ProductAccount[] = (itemAccounts as unknown as SupabaseOrderItemAccount[] || []).flatMap(acc => 
-            acc.product_accounts.map(pa => ({
-              id: pa.id,
-              email: pa.email,
-              password: pa.password,
-              productId: pa.product_id,
-              isSold: pa.is_sold
-            }))
-          )
-
-          items.push({
-            id: item.id,
-            productId: item.product_id,
-            name: item.name,
-            quantity: item.quantity,
-            price: item.price,
-            accounts,
-            type: item.type
-          })
-        }
-
-        ordersWithItems.push({
-          id: order.id,
-          userId: order.user_id,
-          userEmail: order.user_email,
-          total: order.total,
-          status: order.status,
-          paymentMethod: order.payment_method,
-          createdAt: new Date(order.created_at),
-          items
-        })
-      }
-
-      return ordersWithItems
-    } catch (error) {
-      console.error('Error in getAllOrders:', error)
-      return []
-    }
-  }
-
-  async getOrderById(orderId: string): Promise<OrderWithItems | null> {
-    try {
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('id', orderId)
-        .single()
-
-      if (orderError || !order) {
-        return null
-      }
-
-      const { data: orderItems, error: itemsError } = await supabase
-        .from('order_items')
-        .select('*')
-        .eq('order_id', orderId)
-
-      if (itemsError) {
-        console.error('Error fetching order items:', itemsError)
-        return null
-      }
-
-      const items: OrderItem[] = []
-      
-      for (const item of orderItems || []) {
-        // Obtener las cuentas asociadas a este order_item
-        const { data: itemAccounts, error: accountsError } = await supabase
-          .from('order_item_accounts')
-          .select(`
-            product_accounts!inner(*)
-          `)
-          .eq('order_item_id', item.id)
-
-        if (accountsError) {
-          console.error('Error fetching item accounts:', accountsError)
-          continue
-        }
-
-        const accounts: ProductAccount[] = (itemAccounts as unknown as SupabaseOrderItemAccount[] || []).flatMap(acc => 
-          acc.product_accounts.map(pa => ({
-            id: pa.id,
-            email: pa.email,
-            password: pa.password,
-            productId: pa.product_id,
-            isSold: pa.is_sold
-          }))
-        )
-
-        items.push({
+        completedAt: order.completed_at ? new Date(order.completed_at) : undefined,
+        cancelledAt: order.cancelled_at ? new Date(order.cancelled_at) : undefined,
+        items: order.order_items?.map(item => ({
           id: item.id,
+          orderId: order.id,
           productId: item.product_id,
           name: item.name,
           quantity: item.quantity,
           price: item.price,
-          accounts,
-          type: item.type
-        })
+          type: item.type,
+          accounts: item.order_item_accounts?.map(acc => ({
+            id: acc.product_accounts?.id || '',
+            email: acc.product_accounts?.email || '',
+            password: acc.product_accounts?.password || '',
+            productId: item.product_id,
+            isSold: true,
+            additionalInfo: acc.product_accounts?.additional_info
+          })) || []
+        })) || []
+      }))
+
+      return ordersWithItems
+    } catch (error) {
+      console.error('Error in getUserOrders:', error)
+      throw error instanceof Error ? error : new Error('Error inesperado al obtener las órdenes')
+    }
+  }
+
+  /**
+   * Obtiene todas las órdenes con consultas optimizadas
+   */
+  async getAllOrders(limit?: number, offset?: number): Promise<OrderWithItems[]> {
+    try {
+      // Construir la consulta con paginación opcional
+      let query = supabase
+        .from('orders')
+        .select(`
+          id,
+          user_id,
+          user_email,
+          total,
+          status,
+          payment_method,
+          created_at,
+          completed_at,
+          cancelled_at,
+          order_items (
+            id,
+            product_id,
+            name,
+            quantity,
+            price,
+            type,
+            order_item_accounts (
+              product_accounts (
+                id,
+                email,
+                password,
+                additional_info
+              )
+            )
+          )
+        `)
+        .order('created_at', { ascending: false })
+
+      // Aplicar paginación si se especifica
+      if (limit) {
+        query = query.limit(limit)
+      }
+      if (offset) {
+        query = query.range(offset, offset + (limit || 50) - 1)
       }
 
-      return {
+      const { data: ordersData, error: ordersError } = await query
+
+      if (ordersError) {
+        console.error('Error fetching all orders:', ordersError)
+        throw new Error('No se pudieron obtener las órdenes')
+      }
+
+      if (!ordersData || ordersData.length === 0) {
+        return []
+      }
+
+      // Transformar los datos al formato esperado
+      const ordersWithItems: OrderWithItems[] = ordersData.map(order => ({
         id: order.id,
         userId: order.user_id,
         userEmail: order.user_email,
@@ -359,39 +230,304 @@ class OrderService {
         status: order.status,
         paymentMethod: order.payment_method,
         createdAt: new Date(order.created_at),
-        items
+        completedAt: order.completed_at ? new Date(order.completed_at) : undefined,
+        cancelledAt: order.cancelled_at ? new Date(order.cancelled_at) : undefined,
+        items: order.order_items?.map(item => ({
+          id: item.id,
+          orderId: order.id,
+          productId: item.product_id,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          type: item.type,
+          accounts: item.order_item_accounts?.map(acc => ({
+            id: acc.product_accounts?.id || '',
+            email: acc.product_accounts?.email || '',
+            password: acc.product_accounts?.password || '',
+            productId: item.product_id,
+            isSold: true,
+            additionalInfo: acc.product_accounts?.additional_info
+          })) || []
+        })) || []
+      }))
+
+      return ordersWithItems
+    } catch (error) {
+      console.error('Error in getAllOrders:', error)
+      throw error instanceof Error ? error : new Error('Error inesperado al obtener todas las órdenes')
+    }
+  }
+
+  /**
+   * Obtiene una orden específica por ID con consulta optimizada
+   */
+  async getOrderById(orderId: string): Promise<OrderWithItems | null> {
+    try {
+      if (!orderId) {
+        throw new Error('ID de orden requerido')
       }
+
+      // Usar una sola consulta con joins para obtener toda la información
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
+        .select(`
+          id,
+          user_id,
+          user_email,
+          total,
+          status,
+          payment_method,
+          created_at,
+          completed_at,
+          cancelled_at,
+          order_items (
+            id,
+            product_id,
+            name,
+            quantity,
+            price,
+            type,
+            order_item_accounts (
+              product_accounts (
+                id,
+                email,
+                password,
+                additional_info
+              )
+            )
+          )
+        `)
+        .eq('id', orderId)
+        .single()
+
+      if (orderError) {
+        if (orderError.code === 'PGRST116') {
+          // No se encontró la orden
+          return null
+        }
+        console.error('Error fetching order:', orderError)
+        throw new Error('No se pudo obtener la orden')
+      }
+
+      if (!orderData) {
+        return null
+      }
+
+      // Transformar los datos al formato esperado
+      const orderWithItems: OrderWithItems = {
+        id: orderData.id,
+        userId: orderData.user_id,
+        userEmail: orderData.user_email,
+        total: orderData.total,
+        status: orderData.status,
+        paymentMethod: orderData.payment_method,
+        createdAt: new Date(orderData.created_at),
+        completedAt: orderData.completed_at ? new Date(orderData.completed_at) : undefined,
+        cancelledAt: orderData.cancelled_at ? new Date(orderData.cancelled_at) : undefined,
+        items: orderData.order_items?.map(item => ({
+          id: item.id,
+          orderId: orderData.id,
+          productId: item.product_id,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          type: item.type,
+          accounts: item.order_item_accounts?.map(acc => ({
+            id: acc.product_accounts?.[0]?.id || '',
+            email: acc.product_accounts?.[0]?.email || '',
+            password: acc.product_accounts?.[0]?.password || '',
+            productId: item.product_id,
+            isSold: true,
+            additionalInfo: acc.product_accounts?.[0]?.additional_info
+          })) || []
+        })) || []
+      }
+
+      return orderWithItems
     } catch (error) {
       console.error('Error in getOrderById:', error)
-      return null
+      throw error instanceof Error ? error : new Error('Error inesperado al obtener la orden')
     }
   }
 
+  /**
+   * Actualiza el estado de una orden
+   */
   async updateOrderStatus(orderId: string, status: string): Promise<boolean> {
     try {
+      if (!orderId || !status) {
+        throw new Error('ID de orden y estado son requeridos')
+      }
+
+      const updateData: any = { status }
+      
+      // Agregar timestamp según el estado
+      if (status === 'completed') {
+        updateData.completed_at = new Date().toISOString()
+      } else if (status === 'cancelled') {
+        updateData.cancelled_at = new Date().toISOString()
+      }
+
       const { error } = await supabase
         .from('orders')
-        .update({ status })
+        .update(updateData)
         .eq('id', orderId)
 
-      return !error
+      if (error) {
+        console.error('Error updating order status:', error)
+        throw new Error('No se pudo actualizar el estado de la orden')
+      }
+
+      return true
     } catch (error) {
       console.error('Error in updateOrderStatus:', error)
-      return false
+      throw error instanceof Error ? error : new Error('Error inesperado al actualizar el estado')
     }
   }
 
+  /**
+   * Elimina una orden (solo para administradores)
+   */
   async deleteOrder(orderId: string): Promise<boolean> {
     try {
+      if (!orderId) {
+        throw new Error('ID de orden requerido')
+      }
+
+      // Primero verificar si la orden existe
+      const order = await this.getOrderById(orderId)
+      if (!order) {
+        throw new Error('Orden no encontrada')
+      }
+
+      // Eliminar la orden (las relaciones se eliminan en cascada)
       const { error } = await supabase
         .from('orders')
         .delete()
         .eq('id', orderId)
 
-      return !error
+      if (error) {
+        console.error('Error deleting order:', error)
+        throw new Error('No se pudo eliminar la orden')
+      }
+
+      return true
     } catch (error) {
       console.error('Error in deleteOrder:', error)
-      return false
+      throw error instanceof Error ? error : new Error('Error inesperado al eliminar la orden')
+    }
+  }
+
+  /**
+   * Obtiene los items de una orden específica
+   */
+  async getOrderItems(orderId: string): Promise<OrderItem[]> {
+    try {
+      if (!orderId) {
+        throw new Error('ID de orden requerido')
+      }
+
+      const { data: itemsData, error } = await supabase
+        .from('order_items')
+        .select(`
+          id,
+          product_id,
+          name,
+          quantity,
+          price,
+          type,
+          order_item_accounts (
+            product_accounts (
+              id,
+              email,
+              password,
+              additional_info
+            )
+          )
+        `)
+        .eq('order_id', orderId)
+
+      if (error) {
+        console.error('Error fetching order items:', error)
+        throw new Error('No se pudieron obtener los items de la orden')
+      }
+
+      return itemsData?.map(item => ({
+        id: item.id,
+        orderId,
+        productId: item.product_id,
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        type: item.type,
+        accounts: item.order_item_accounts?.map(acc => ({
+          id: acc.product_accounts?.[0]?.id || '',
+          email: acc.product_accounts?.[0]?.email || '',
+          password: acc.product_accounts?.[0]?.password || '',
+          productId: item.product_id,
+          isSold: true,
+          additionalInfo: acc.product_accounts?.[0]?.additional_info
+        })) || []
+      })) || []
+    } catch (error) {
+      console.error('Error in getOrderItems:', error)
+      throw error instanceof Error ? error : new Error('Error inesperado al obtener los items')
+    }
+  }
+
+  /**
+   * Obtiene estadísticas de órdenes
+   */
+  async getOrderStats(userId?: string): Promise<OrderSummary> {
+    try {
+      let query = supabase.from('orders').select('status, total, created_at')
+      
+      if (userId) {
+        query = query.eq('user_id', userId)
+      }
+
+      const { data: orders, error } = await query
+
+      if (error) {
+        console.error('Error fetching order stats:', error)
+        throw new Error('No se pudieron obtener las estadísticas')
+      }
+
+      const stats: OrderSummary = {
+        totalOrders: orders?.length || 0,
+        completedOrders: orders?.filter(o => o.status === 'completed').length || 0,
+        pendingOrders: orders?.filter(o => o.status === 'pending').length || 0,
+        cancelledOrders: orders?.filter(o => o.status === 'cancelled').length || 0,
+        totalRevenue: orders?.filter(o => o.status === 'completed')
+          .reduce((sum, o) => sum + o.total, 0) || 0
+      }
+
+      return stats
+    } catch (error) {
+      console.error('Error in getOrderStats:', error)
+      throw error instanceof Error ? error : new Error('Error inesperado al obtener estadísticas')
+    }
+  }
+
+  /**
+   * Verifica si un usuario puede realizar una nueva compra
+   */
+  async canUserPurchase(userId: string, cartItems: CartItem[]): Promise<{ canPurchase: boolean; reason?: string }> {
+    try {
+      // Get user balance first
+      const user = await authService.getUserById(userId)
+      if (!user) {
+        return { canPurchase: false, reason: 'Usuario no encontrado' }
+      }
+      
+      const result = await transactionService.canProcessTransaction(cartItems, user.balance)
+      return { 
+        canPurchase: result.canProcess, 
+        reason: result.issues.length > 0 ? result.issues.join('; ') : undefined 
+      }
+    } catch (error) {
+      console.error('Error checking user purchase ability:', error)
+      return { canPurchase: false, reason: 'Error al verificar capacidad de compra' }
     }
   }
 }
